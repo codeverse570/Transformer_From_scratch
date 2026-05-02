@@ -37,7 +37,7 @@ class Transformer :
             
          del_E,loss,dec_emb_grad,dec_pos_grad = self.decoder.back_pre(targets, prob)
     #      print(f"loss:- {loss} | iteration:- {iteration}")
-         print(del_E)
+        #  print(del_E)
          enc_emb_grad,enc_pos_grad=self.encoder.back_pre(del_E, E,encoder_inputs)
          self.emb.weight-= self.emb_ad.grad(dec_emb_grad+enc_emb_grad,self.emb)
          self.pos.weight-= self.pos_ada.grad(dec_pos_grad+enc_pos_grad,self.emb)
