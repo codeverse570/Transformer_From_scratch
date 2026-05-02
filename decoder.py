@@ -17,7 +17,7 @@ from dropout import Dropout
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
-tokenizer = Tokenizer.from_file("bpe_tokenizer.json")
+tokenizer = Tokenizer.from_file("bpe_translation.json")
 
 from utils.utils import abs_mean
 negative_inf = float('-inf')
