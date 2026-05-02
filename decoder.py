@@ -11,7 +11,6 @@ from encoder import Encoder
 # from AdamCustom import AdamCustom
 from adam import AdamCustom
 from utils.utils import count_tensors,debug_top_tensors
-import matplotlib.pyplot as plt
 from tokenizers import Tokenizer
 from dropout import Dropout
 # from transformer import Transformer
