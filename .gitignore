@@ -1,0 +1,17 @@
+models/
+bpe_tokenizer.json
+set.json
+test_tokens.json
+test.txt
+tokens.json
+train_decoder_input.npy
+train_decoder_target.npy
+train_encoder.npy
+train_tokens.json
+validate_tokens.json
+validate_decoder_input.npy
+validate_encoder.npy
+validate_decoder_target.npy
+train.txt
+validate.txt
+data/
