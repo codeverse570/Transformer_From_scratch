@@ -2,6 +2,7 @@ import json
 import time
 
 import numpy as np
+from tokenizers import Tokenizer
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -63,12 +64,12 @@ if __name__ == "__main__":
     with open('translation_data/validation/validation_decoder_target.json', 'rb') as file:
         x_validation_target = np.array(json.load(file))
 
-    test_batch=x_train_encoder[1:2]
+    test_batch=x_train_encoder[2:3]
     # iteration=1
     epoch = 11
 
     model= Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000, max_len=128, layers=3, batch_size=64)
-    # model=  torch.load('./models/transformer-20.pth',weights_only=False) 
+    model=  torch.load('./models/transformer-20.pth',weights_only=False) 
     # # print("hello")
     iteration=0
     start_time = time.perf_counter()
@@ -95,5 +96,13 @@ if __name__ == "__main__":
          epoch+=1
        
          print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
-    # print(predict(np.array([[2, 44, 887, 1048, 255, 1843, 207, 12519, 17, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]),x_train_target[1:2],model.encoder,model.decoder))
+    samples = [
+        "Hello, how are you?",
+        "The weather is nice today.",
+        "I would like to order a coffee.",
+        "The quick brown fox jumps over the lazy dog.",
+         ]
+    tokenizer=Tokenizer.from_file("bpe_translation.json")
+    sample=np.array([tokenizer.encode(samples[1]).ids+[0]*(128-len(tokenizer.encode(samples[1])))])
+    print(predict(sample,x_train_encoder[2:3],model.encoder,model.decoder))
     print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))

@@ -230,7 +230,7 @@ if __name__ == "__main__":
         "The quick brown fox jumps over the lazy dog.",
          ]
     tokenizer=Tokenizer.from_file("bpe_translation.json")
-    print(tokenizer.encode(samples[2]).ids+[0]*118)
-
+    print(tokenizer.encode(samples[3]).ids+[0]*(128-len(tokenizer.encode(samples[3]))))
+    print(len([2, 421, 6505, 2026, 1300, 230, 2100, 329, 410, 1603, 1073, 226, 250, 5655, 8265, 17, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]))
      
 
