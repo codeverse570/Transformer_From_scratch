@@ -27,6 +27,8 @@ class Transformer :
          
          self.decoder.emb=self.emb
          self.decoder.pos=self.pos
+         self.encoder.emb= self.emb
+         self.encoder.pos= self.pos
          self.decoder.train()
          self.encoder.train()
          E,E_pad_mask = self.encoder.fit_pre(encoder_inputs)
