@@ -22,10 +22,10 @@ class Transformer :
          
          self.decoder= Decoder(d_model,d_ff,h_count,voc_size,max_len,layers,batch_size,schedular=self.schedular)
          self.encoder= Encoder(d_model,h_count,d_ff,voc_size,max_len,layers,batch_size,schedular=self.schedular)
-        #  nn.init.xavier_normal_(self.emb.weight)
-        #  nn.init.xavier_normal_(self.pos.weight)
-         nn.init.normal_(self.emb.weight, mean=0, std=d_model ** -0.5)
-         nn.init.normal_(self.pos.weight, mean=0, std=d_model ** -0.5)
+         nn.init.xavier_normal_(self.emb.weight)
+         nn.init.xavier_normal_(self.pos.weight)
+        #  nn.init.normal_(self.emb.weight, mean=0, std=d_model ** -0.5)
+        #  nn.init.normal_(self.pos.weight, mean=0, std=d_model ** -0.5)
     def fit(self,encoder_inputs,decoder_inputs,targets):
          
          self.decoder.emb=self.emb
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     epoch = 11
 
     model= Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000, max_len=128, layers=3, batch_size=64)
-    # model=  torch.load('./models/transformer-20.pth',weights_only=False) 
+    model=  torch.load('./models/transformer-20.pth',weights_only=False) 
     # # print("hello")
     iteration=0
     start_time = time.perf_counter()

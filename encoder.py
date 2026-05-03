@@ -262,7 +262,7 @@ class Encoder:
         #  W_voc_grad = W_voc_grad / counts.unsqueeze(1)
         #  rows_list   = flat_tokens.unique().tolist()
         #  emb_grad=self.emb_ad.grad_emb(W_voc_grad[rows_list] ,rows_list,self.emb.weight[rows_list])
-         pos_grad= self.pos_ada.grad(torch.sum(new_delta , dim=0),self.pos.weight)
+        #  pos_grad= self.pos_ada.grad(torch.sum(new_delta , dim=0),self.pos.weight)
         #  self.emb.weight[rows_list] -= emb_grad
         #  self.pos.weight -= pos_grad
         #  print(self.pos.weight.abs().mean(),pos_grad.abs().mean())

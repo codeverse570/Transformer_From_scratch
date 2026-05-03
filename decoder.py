@@ -342,7 +342,11 @@ class Decoder(nn.Module):
             self.self_att_v.append(multi_self_att_V)
             self.self_att_a.append(multi_self_att_A)
             self.self_att_raw_a.append(multi_self_att_raw_A)
-           
+            # total = self.self_att_a[layer].numel()
+            # count = (self.self_att_a[layer] > 1).sum().item()
+
+            # print("count:", count)
+            # print("percentage:", count / total)
             inputs = cross_out + self.dropout['ff_out'].train(self.is_training).forward(ff_output)
         self.H = inputs
         # print(self.W_voc.bias.shape)
