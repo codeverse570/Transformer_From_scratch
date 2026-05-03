@@ -1,6 +1,6 @@
 import torch
 class Dropout:
-    def __init__(self, p=0.2):
+    def __init__(self, p=0.15):
         self.p = p
         self.training = True
         self.masks = []  # stack instead of single mask
