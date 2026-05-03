@@ -89,7 +89,7 @@ if __name__ == "__main__":
          total_time= end_time-start_time
          print(f"total time:- {total_time:.1f}")
          if(epoch%5==0):
-            torch.save(model,f'./models/transformer-{epoch}.pth')
+            torch.save(model,f'../workspace/models/transformer-{epoch}.pth')
 
          print(f"loss:- {total_loss/total_iteration} | epoch:- {epoch}")
          epoch+=1
