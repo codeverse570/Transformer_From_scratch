@@ -367,23 +367,35 @@ class Decoder(nn.Module):
         return prob
 
 
-    def back_pre(self, targets, prob):
+    def back_pre(self, targets, prob, smoothing=0.1):
+
+
         rescaled_targets = np.expand_dims(targets, axis=-1)
         targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
         # print(targets_t.shape)
-        tokens_prob = prob.gather(dim=-1, index=targets_t)
-        tokens_prob = torch.clamp(tokens_prob, min=1e-9)
-        log_tokens_prob = torch.log(tokens_prob)
-        # print(torch.tensor(targets).shape,log_tokens_prob.shape)
-        mask= (targets_t!=0)
+        mask = (targets_t != 0)
+        log_prob = torch.log(prob.clamp(min=1e-9))              # (B, T, vocab)
         
-        loss = (-torch.sum(log_tokens_prob*mask))/mask.sum()
+        # correct token log prob
+        log_correct = log_prob.gather(dim=-1, index=targets_t)  # (B, T, 1)
+        
+        # uniform distribution penalty — mean log prob across all tokens
+        log_uniform = log_prob.mean(dim=-1, keepdim=True)       # (B, T, 1)
+        
+        smoothed_loss_per_token = (
+            -(1.0 - smoothing) * log_correct 
+            - smoothing * log_uniform
+        )                                                        # (B, T, 1)
+        
+        loss = (smoothed_loss_per_token * mask).sum() / mask.sum()
         # print(loss)
-        delta_z = self.gradient_softmax_cross_entropy(targets, prob)*mask
-        delta_z= delta_z/mask.sum()
+        delta_z = self.gradient_softmax_cross_entropy(targets, prob, smoothing)
+
+        # apply mask and normalise — same normalisation as loss
+        delta_z = delta_z * mask / mask.sum()
         delta_W_voc = self.gradient_W_voc(delta_z).T
         # print(delta_z.shape)
-        delta_W_voc_b= delta_z.sum(dim=(0,1))
+        # delta_W_voc_b= delta_z.sum(dim=(0,1))
         # delta_H = delta_z @ self.emb.weight
     
         delta_H = delta_z@ self.emb.weight
@@ -620,13 +632,27 @@ class Decoder(nn.Module):
         )
 
         return del_x, del_alpha, del_beta
-    def gradient_softmax_cross_entropy(self, targets, prob):
-        targets = torch.tensor(targets)
-        delta_z = prob.clone()
-        delta_z[torch.arange(self.batch_size)[:, None],
-                torch.arange(self.sent_len),
-                targets] -= 1
-        return delta_z
+    def gradient_softmax_cross_entropy(self, targets, prob, smoothing=0.1):
+        targets = torch.tensor(targets, device=device)        # (B, T)
+        B, T, V = prob.shape
+
+        # base: prob at every position (normal softmax CE grad starting point)
+        delta_z = prob.clone()                                # (B, T, V)
+
+        # subtract (1 - smoothing) at the correct token index
+        # normal CE would subtract 1.0 here — smoothing reduces it to 0.9
+        delta_z[torch.arange(B)[:, None],
+                torch.arange(T),
+                targets] -= (1.0 - smoothing)
+
+        # subtract smoothing/V from every vocab position
+        # this is the gradient of the uniform distribution penalty term
+        # mathematically: d/dz [ -eps * mean(log p) ] = eps/V * (p - 1/p... )
+        # simplified: just subtract eps/V from every position since d(-log p_i)/dz_j = p_j - 1_{i==j}
+        # summed uniformly: p_j - 1/V  →  already captured by subtracting 1/V
+        delta_z -= smoothing / V
+
+        return delta_z                                        # (B, T, V)
 
     def gradient_W_voc(self, delta_z):
     #    return torch.einsum('bti,btj->ij', self.H, delta_z)
