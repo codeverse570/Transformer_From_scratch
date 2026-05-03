@@ -96,9 +96,9 @@ class Decoder(nn.Module):
         self.E = None
         self.D = None
 
-        nn.init.xavier_uniform_(self.W_voc.weight)
-        nn.init.xavier_normal_(self.emb.weight)
-        nn.init.xavier_normal_(self.pos.weight)
+        # nn.init.xavier_uniform_(self.W_voc.weight)
+        # nn.init.xavier_normal_(self.emb.weight)
+        # nn.init.xavier_normal_(self.pos.weight)
         self.epsilon = 0.001
         self.causal_mask = torch.triu(torch.full((self.sent_len, self.sent_len), float('-inf'), device=device), diagonal=1)
 

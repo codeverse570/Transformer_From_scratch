@@ -60,8 +60,8 @@ class Encoder:
       self.att_a=[] 
       self.att_raw_a=[]       
       self.epsilon = 0.001
-      nn.init.xavier_normal_(self.emb.weight)
-      nn.init.xavier_normal_(self.pos.weight)
+    #   nn.init.xavier_normal_(self.emb.weight)
+    #   nn.init.xavier_normal_(self.pos.weight)
 
     def intialize_weights(self):
        W_q=[]
