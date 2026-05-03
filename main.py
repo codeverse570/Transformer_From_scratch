@@ -230,7 +230,7 @@ if __name__ == "__main__":
         "The quick brown fox jumps over the lazy dog.",
          ]
     tokenizer=Tokenizer.from_file("bpe_translation.json")
-    print(tokenizer.encode(samples[1]).ids+[0]*120)
+    print(tokenizer.encode(samples[2]).ids+[0]*118)
 
      
 

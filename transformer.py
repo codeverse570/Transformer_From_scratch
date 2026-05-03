@@ -79,7 +79,7 @@ if __name__ == "__main__":
              with torch.no_grad():
                  loss= model.fit(x_train_encoder[i:i+64],x_train_decoder[i:i+64],x_train_target[i:i+64])
                  total_loss+=loss
-                 print(iteration)
+                #  print(iteration)
                  iteration+=1
          
             
@@ -93,5 +93,5 @@ if __name__ == "__main__":
          epoch+=1
        
          print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
-    print(predict(np.array([[2, 421, 11858, 338, 6197, 3378, 17, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]),x_train_target[1:2],model.encoder,model.decoder))
-    # print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
+    # print(predict(np.array([[2, 44, 887, 1048, 255, 1843, 207, 12519, 17, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]),x_train_target[1:2],model.encoder,model.decoder))
+    print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
