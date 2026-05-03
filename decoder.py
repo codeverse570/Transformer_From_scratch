@@ -374,24 +374,20 @@ class Decoder(nn.Module):
     def back_pre(self, targets, prob, smoothing=0.1):
 
 
-        rescaled_targets = np.expand_dims(targets, axis=-1)
-        targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
-        # print(targets_t.shape)
+        # rescaled_targets = np.expand_dims(targets, axis=-1)
+        # targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
+        # # print(targets_t.shape)
+        # mask = (targets_t != 0)
+        log_prob = torch.log(prob.clamp(min=1e-9))   # your current approach (less stable)
+
+        targets_t = torch.tensor(targets, dtype=torch.long, device=device).unsqueeze(-1)
         mask = (targets_t != 0)
-        log_prob = torch.log(prob.clamp(min=1e-9))              # (B, T, vocab)
-        
-        # correct token log prob
-        log_correct = log_prob.gather(dim=-1, index=targets_t)  # (B, T, 1)
-        
-        # uniform distribution penalty — mean log prob across all tokens
-        log_uniform = log_prob.mean(dim=-1, keepdim=True)       # (B, T, 1)
-        
-        smoothed_loss_per_token = (
-            -(1.0 - smoothing) * log_correct 
-            - smoothing * log_uniform
-        )                                                        # (B, T, 1)
-        
-        loss = (smoothed_loss_per_token * mask).sum() / mask.sum()
+
+        nll_loss    = -log_prob.gather(dim=-1, index=targets_t)       # (B, T, 1)
+        smooth_loss = -log_prob.mean(dim=-1, keepdim=True)             # (B, T, 1)
+
+        loss_per_token = (1 - smoothing) * nll_loss + smoothing * smooth_loss
+        loss = (loss_per_token * mask).sum() / mask.sum()
         # print(loss)
         delta_z = self.gradient_softmax_cross_entropy(targets, prob, smoothing)
 
@@ -637,17 +633,19 @@ class Decoder(nn.Module):
 
         return del_x, del_alpha, del_beta
     def gradient_softmax_cross_entropy(self, targets, prob, smoothing=0.1):
-        targets = torch.tensor(targets, device=device)        # (B, T)
+        targets = torch.tensor(targets, device=device)
         B, T, V = prob.shape
 
-        # base: prob at every position (normal softmax CE grad starting point)
-        delta_z = prob.clone()                                # (B, T, V)
+        delta_z = prob.clone()  # ∂(-mean log p)/∂z_j = p_j - 1/V, so starting with p is right
 
-        # subtract (1 - smoothing) at the correct token index
-        # normal CE would subtract 1.0 here — smoothing reduces it to 0.9
-        delta_z[torch.arange(B)[:, None],
-                torch.arange(T),
-                targets] -= (1.0 - smoothing)
+        # (1-ε) term: subtract 1 at correct token
+        delta_z[torch.arange(B)[:, None], torch.arange(T), targets] -= (1.0 - smoothing)
+
+        # ε term: gradient of -ε * mean(log p) w.r.t z_j = ε*(p_j - 1/V)
+        # p_j is already in delta_z; just subtract ε/V
+        delta_z -= smoothing / V   # the +ε*p_j part is already implicitly there via the clone
+
+        return delta_z
 
         # subtract smoothing/V from every vocab position
         # this is the gradient of the uniform distribution penalty term
@@ -779,7 +777,7 @@ class Decoder(nn.Module):
         Q = (x @ self.W_q[layer].weight+self.W_q[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
         K = (x @ self.W_k[layer].weight+self.W_k[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         V = (x @ self.W_v[layer].weight+self.W_v[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-        temp=1.5
+        temp=1
         S = Q @ K.transpose(-2, -1) /(math.sqrt(self.d_k)*temp)  
         pad_mask = torch.tensor(self.pad_mask, dtype=torch.bool, device=device)    # (B, H, T, T)
         S = S + self.causal_mask[:T, :T]
@@ -806,7 +804,7 @@ class Decoder(nn.Module):
         Q = (z1 @ Wq+Wq_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         K = (E @ Wk+Wk_b).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
         V = (E @ Wv+Wv_b).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
-        temp=1.5
+        temp=1
         S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
         # S = S - S.max(dim=-1, keepdim=True)[0]
         pad_mask = torch.tensor(E_pad_mask, dtype=torch.bool, device=device) 
