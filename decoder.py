@@ -372,7 +372,7 @@ class Decoder(nn.Module):
         return prob
 
 
-    def back_pre(self, targets, prob, smoothing=0):
+    def back_pre(self, targets, prob, smoothing=0.1):
 
 
         # rescaled_targets = np.expand_dims(targets, axis=-1)
@@ -386,7 +386,7 @@ class Decoder(nn.Module):
 
         nll_loss    = -log_prob.gather(dim=-1, index=targets_t)       # (B, T, 1)
         smooth_loss = -log_prob.mean(dim=-1, keepdim=True)             # (B, T, 1)
-
+        
         loss_per_token = (1 - smoothing) * nll_loss + smoothing * smooth_loss
         loss = (loss_per_token * mask).sum() / mask.sum()
         # print(loss)
@@ -636,16 +636,12 @@ class Decoder(nn.Module):
     def gradient_softmax_cross_entropy(self, targets, prob, smoothing=0.1):
         targets = torch.tensor(targets, device=device)
         B, T, V = prob.shape
+        eps = smoothing
+        delta_z = prob.clone()
 
-        delta_z = prob.clone()  # ∂(-mean log p)/∂z_j = p_j - 1/V, so starting with p is right
-
-        # (1-ε) term: subtract 1 at correct token
-        delta_z[torch.arange(B)[:, None], torch.arange(T), targets] -= (1.0 - smoothing)
-
-        # ε term: gradient of -ε * mean(log p) w.r.t z_j = ε*(p_j - 1/V)
-        # p_j is already in delta_z; just subtract ε/V
-        delta_z -= smoothing / V   # the +ε*p_j part is already implicitly there via the clone
-
+        delta_z[torch.arange(B)[:,None], torch.arange(T), targets] -= 1.0
+        # delta_z[torch.arange(B)[:, None], torch.arange(T), targets] -= (1.0 - smoothing)
+        delta_z = (1 - eps) * delta_z + eps * (prob - 1.0 / V)
         return delta_z
 
         # subtract smoothing/V from every vocab position
@@ -653,9 +649,7 @@ class Decoder(nn.Module):
         # mathematically: d/dz [ -eps * mean(log p) ] = eps/V * (p - 1/p... )
         # simplified: just subtract eps/V from every position since d(-log p_i)/dz_j = p_j - 1_{i==j}
         # summed uniformly: p_j - 1/V  →  already captured by subtracting 1/V
-        delta_z -= smoothing / V
-
-        return delta_z                                        # (B, T, V)
+                                   # (B, T, V)
 
     def gradient_W_voc(self, delta_z):
     #    return torch.einsum('bti,btj->ij', self.H, delta_z)

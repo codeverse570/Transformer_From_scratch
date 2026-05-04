@@ -13,7 +13,7 @@ from encoder import Encoder
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Transformer :
     def __init__(self,voc_size,d_model,max_len,d_ff,h_count,layers,batch_size,lr=0.0003,epochs=40):
-         self.schedular= SchedulerState(lr,4000,62500)
+         self.schedular= SchedulerState(lr,4000,1000000)
          self.emb=nn.Embedding(voc_size, d_model ,device=device)
          self.emb_ad = AdamCustom(0.99, voc_size, d_model, 0.01,schedular=self.schedular)
          self.pos= nn.Embedding(max_len,d_model,device=device)
