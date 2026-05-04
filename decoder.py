@@ -36,7 +36,7 @@ class Decoder(nn.Module):
         self.sent_len = sent_len
         self.layers = layers
         self.batch_size = batch_size
-        self.dropout= {'emb':Dropout(0),'emb_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+        self.dropout= {'emb':Dropout(),'emb_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
         self.pad_mask=[]
@@ -261,13 +261,14 @@ class Decoder(nn.Module):
         inputs= self.dropout['emb'].train(self.is_training).forward(inputs)
         # inputs = embeddings+ self.sin_pos[:len(X[0])]
         # inputs = embeddings
-        self.E = E
+        
 
         # NEW: store residual inputs (needed for correct gradients later)
         self.residual_self = []
         self.residual_cross = []
         self.residual_ff = []
         E= self.dropout['emb_out'].train(self.is_training).forward(E)
+        self.E = E
         for layer in range(self.layers):
 
             # =========================

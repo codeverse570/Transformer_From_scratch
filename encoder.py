@@ -24,11 +24,11 @@ class Encoder:
       self.h_count=h_count
       self.d_ff=d_ff
       self.d_k= d_model//h_count
-      self.dropout= Dropout()
+    #   self.dropout= Dropout()
       self.voc_size= voc_size
       self.sent_len= sent_len
       self.pad_mask=[]
-      self.dropout= {'emb':Dropout(0),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+      self.dropout= {'emb':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
       self.schedular=schedular
       self.emb = nn.Embedding(voc_size,self.d_model,device=device)
       self.pos= nn.Embedding(sent_len,self.d_model,device=device)
