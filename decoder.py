@@ -253,7 +253,8 @@ class Decoder(nn.Module):
         self.self_att_a = []
         self.self_att_raw_a = []
         # print(self.emb.weight.shape)
-        self.pad_mask= self.create_pad_mask(X)
+        self.pad_mask_q= self.create_pad_mask_q(X)
+        self.pad_mask_k = self.create_pad_mask_k(X)
         embeddings = self.emb.weight[X]* math.sqrt(self.d_model)
         self.D = X
         inputs = embeddings+ self.pos.weight[:len(X[0])]
@@ -779,7 +780,7 @@ class Decoder(nn.Module):
         V = (x @ self.W_v[layer].weight+self.W_v[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         temp=1
         S = Q @ K.transpose(-2, -1) /(math.sqrt(self.d_k)*temp)  
-        pad_mask = torch.tensor(self.pad_mask, dtype=torch.bool, device=device)    # (B, H, T, T)
+        pad_mask = torch.tensor(self.pad_mask_k|self.pad_mask_q, dtype=torch.bool, device=device)    # (B, H, T, T)
         S = S + self.causal_mask[:T, :T]
         S= S.masked_fill(pad_mask,negative_inf)
     
@@ -807,7 +808,7 @@ class Decoder(nn.Module):
         temp=1
         S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
         # S = S - S.max(dim=-1, keepdim=True)[0]
-        pad_mask = torch.tensor(E_pad_mask, dtype=torch.bool, device=device) 
+        pad_mask = torch.tensor(E_pad_mask|self.pad_mask_q, dtype=torch.bool, device=device) 
         S= S.masked_fill(pad_mask,negative_inf)
         A = F.softmax(S, dim=-1)  
         A = torch.nan_to_num(A, nan=0.0)
@@ -815,7 +816,6 @@ class Decoder(nn.Module):
         raw_A= A   
         A= self.dropout['cross_att_a'].train(self.is_training).forward(A)                               # (B, H, T, T)
         O = (A @ V).transpose(1, 2).contiguous().view(B, T, -1)
-           # (B, T, d_model)
         output = O @ self.W_cross_o[layer].weight+self.W_cross_o[layer].bias
 
         return output, O, Q, K, V,  A,raw_A
@@ -825,12 +825,18 @@ class Decoder(nn.Module):
         var = X.var(dim=-1, keepdim=True, unbiased=False)
         std = torch.sqrt(var + self.epsilon)
         return ((X - mean) / std) * alpha + beta
-    def create_pad_mask(self, X):
+    def create_pad_mask_q(self, X):
             if not isinstance(X, torch.Tensor):
                 X = torch.tensor(X, device=device)
             pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
+            # pad_k = (X == 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, T)
+            return pad_q  
+    def create_pad_mask_k(self, X):
+            if not isinstance(X, torch.Tensor):
+                X = torch.tensor(X, device=device)
+            # pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
             pad_k = (X == 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, T)
-            return pad_q | pad_k  # (B, 1, T, T)
+            return  pad_k  # (B, 1, T, T)
     def get_sinusoidal_positional_encoding(self,seq_len, d_model):
         pos = torch.arange(seq_len).unsqueeze(1)
         i = torch.arange(d_model).unsqueeze(0)
