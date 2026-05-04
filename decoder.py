@@ -36,7 +36,7 @@ class Decoder(nn.Module):
         self.sent_len = sent_len
         self.layers = layers
         self.batch_size = batch_size
-        self.dropout= {'emb':Dropout(0),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+        self.dropout= {'emb':Dropout(0),'emb_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
         self.pad_mask=[]
@@ -267,7 +267,7 @@ class Decoder(nn.Module):
         self.residual_self = []
         self.residual_cross = []
         self.residual_ff = []
-        
+        E= self.dropout['emb_out'].train(self.is_training).forward(E)
         for layer in range(self.layers):
 
             # =========================
@@ -600,6 +600,7 @@ class Decoder(nn.Module):
         # emb_grad = self.emb_ad.grad_emb(W_voc_grad[rows_list], rows_list,self.emb.weight[rows_list])
         # pos_grad = self.pos_ada.grad(torch.sum(prev_delta, dim=0),self.pos.weight)
         delta_W_voc+= emb_grad
+        del_E= self.dropout['emb_out'].train(self.is_training).backward(del_E)
         # self.emb.weight -= self.W_voc_ada.grad(delta_W_voc,self.emb.weight) 
         # self.pos.weight -= pos_grad
         # print(self.emb.weight.abs().mean())
@@ -878,6 +879,7 @@ class Decoder(nn.Module):
         self.dropout['cross_att_out'].clear()
         self.dropout['ff_layer_1'].clear()
         self.dropout['ff_out'].clear()
+        self.dropout['emb_out'].clear()
         
         # FIX: also null out per-batch state so GC can free these tensors
         self.H = None
