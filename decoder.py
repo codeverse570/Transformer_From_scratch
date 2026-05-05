@@ -39,7 +39,9 @@ class Decoder(nn.Module):
         self.dropout= {'emb':Dropout(0),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
+        
         self.pad_mask=[]
+        self.grads=[]
         self.emb = nn.Embedding(voc_size, self.d_model,device=device)
         self.emb_ad = AdamCustom(0.99, self.voc_size, self.d_model, 0.01,schedular=self.schedular)
         self.pos = nn.Embedding(sent_len, self.d_model,device=device)
@@ -252,6 +254,7 @@ class Decoder(nn.Module):
         self.self_att_s = []
         self.self_att_a = []
         self.self_att_raw_a = []
+    
         # print(self.emb.weight.shape)
         self.pad_mask_q= self.create_pad_mask_q(X)
         self.pad_mask_k = self.create_pad_mask_k(X)
@@ -631,44 +634,45 @@ class Decoder(nn.Module):
                 store['self_alpha'], store['self_beta'],
             ]
 
-        coef = self.clip_grad_norm(all_grads, max_norm)
-        for store in layer_grad_store:
-            layer = store['layer']
-            with torch.no_grad():
-                # FF
-                self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
-                self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
-                self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
-                self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
-                # FF norm
-                self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
-                self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
-                # Cross attention
-                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight)
-                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight)
-                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight)
-                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight)
-                self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
-                self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
-                self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
-                self.W_cross_o[layer].bias   -= self.W_cross_o_ada[layer].grad(store['co_b'] * coef, self.W_cross_o[layer].bias)
-                # Cross norm
-                self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
-                self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
-                # Self attention
-                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight)
-                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight)
-                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight)
-                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight)
-                self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
-                self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
-                self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
-                self.W_o[layer].bias   -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
-                # Self norm
-                self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef, self.W_norm_self_a[layer])
-                self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef, self.W_norm_self_b[layer])
+        # coef = self.clip_grad_norm(all_grads, max_norm)
+        self.grads=layer_grad_store
+        # for store in layer_grad_store:
+        #     layer = store['layer']
+        #     with torch.no_grad():
+        #         # FF
+        #         self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
+        #         self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
+        #         self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
+        #         self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
+        #         # FF norm
+        #         self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
+        #         self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
+        #         # Cross attention
+        #         self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight)
+        #         self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight)
+        #         self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight)
+        #         self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight)
+        #         self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
+        #         self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
+        #         self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
+        #         self.W_cross_o[layer].bias   -= self.W_cross_o_ada[layer].grad(store['co_b'] * coef, self.W_cross_o[layer].bias)
+        #         # Cross norm
+        #         self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
+        #         self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
+        #         # Self attention
+        #         self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight)
+        #         self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight)
+        #         self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight)
+        #         self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight)
+        #         self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
+        #         self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
+        #         self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
+        #         self.W_o[layer].bias   -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
+        #         # Self norm
+        #         self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef, self.W_norm_self_a[layer])
+        #         self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef, self.W_norm_self_b[layer])
         
-        return del_E,loss,coef*delta_W_voc,torch.sum(prev_delta, dim=0)*coef
+        return del_E,loss,delta_W_voc,torch.sum(prev_delta, dim=0),all_grads
 
     # ─────────────────────────────────────────────
     # Gradient helpers
@@ -884,6 +888,43 @@ class Decoder(nn.Module):
         var = X.var(dim=-1, keepdim=True, unbiased=False)
         std = torch.sqrt(var + self.epsilon)
         return ((X - mean) / std) * alpha + beta
+    def update_weights(self,coef):
+         for store in self.grads:
+            layer = store['layer']
+            with torch.no_grad():
+                # FF
+                self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
+                self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
+                self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
+                self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
+                # FF norm
+                self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
+                self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
+                # Cross attention
+                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight)
+                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight)
+                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight)
+                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight)
+                self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
+                self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
+                self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
+                self.W_cross_o[layer].bias   -= self.W_cross_o_ada[layer].grad(store['co_b'] * coef, self.W_cross_o[layer].bias)
+                # Cross norm
+                self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
+                self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
+                # Self attention
+                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight)
+                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight)
+                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight)
+                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight)
+                self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
+                self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
+                self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
+                self.W_o[layer].bias   -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
+                # Self norm
+                self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef, self.W_norm_self_a[layer])
+                self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef, self.W_norm_self_b[layer])
+        
     def clip_grad_norm(self, all_grads, max_norm=1.0):
         """Compute global norm across all encoder gradients and return clip coefficient."""
         total_norm = 0.0
@@ -953,6 +994,7 @@ class Decoder(nn.Module):
         self.dropout['cross_att_out'].clear()
         self.dropout['ff_layer_1'].clear()
         self.dropout['ff_out'].clear()
+        self.grads.clear()
         
         # FIX: also null out per-batch state so GC can free these tensors
         self.H = None

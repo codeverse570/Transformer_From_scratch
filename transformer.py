@@ -41,14 +41,27 @@ class Transformer :
          
          self.schedular.advance()
             
-         del_E,loss,dec_emb_grad,dec_pos_grad = self.decoder.back_pre(targets, prob)
+         del_E,loss,dec_emb_grad,dec_pos_grad,decoder_all_grads = self.decoder.back_pre(targets, prob)
     #      print(f"loss:- {loss} | iteration:- {iteration}")
         #  print(del_E)
-         enc_emb_grad,enc_pos_grad=self.encoder.back_pre(del_E, E,encoder_inputs)
-         self.emb.weight-= self.emb_ad.grad(dec_emb_grad+enc_emb_grad,self.emb)
-         self.pos.weight-= self.pos_ada.grad(dec_pos_grad+enc_pos_grad,self.emb)
+         enc_emb_grad,enc_pos_grad,encoder_all_grads=self.encoder.back_pre(del_E, E,encoder_inputs)
+         coef= self.clip_grad_norm(decoder_all_grads+encoder_all_grads+[dec_emb_grad+enc_emb_grad]+[dec_pos_grad+enc_pos_grad])
+         self.encoder.update_weights(coef)
+         self.decoder.update_weights(coef)
+         self.emb.weight-= self.emb_ad.grad(coef*(dec_emb_grad+enc_emb_grad),self.emb)
+         self.pos.weight-= self.pos_ada.grad(coef*(dec_pos_grad+enc_pos_grad),self.emb)
          
          return loss
+    def clip_grad_norm(self, all_grads, max_norm=1.0):
+        """Compute global norm across all encoder gradients and return clip coefficient."""
+        total_norm = 0.0
+        for g in all_grads:
+            if g is not None:
+                total_norm += g.norm(2).item() ** 2
+        total_norm = total_norm ** 0.5
+        clip_coef = min(1.0, max_norm / (total_norm + 1e-6))
+        # print(f"[Encoder ClipGrad] global_norm={total_norm:.4f}, coef={clip_coef:.4f}")
+        return clip_coef
 if __name__ == "__main__":
     x_train_decoder = []
     x_train_encoder = []
