@@ -21,7 +21,7 @@ class SchedulerState:
             scale = max(0.05, 0.5 * (1.0 + math.cos(math.pi * progress)))
         return self.base_lr * scale
 class AdamCustom:
-    def __init__(self,_, m, n,__, lr=1e-4, beta1=0.9, beta2=0.98, eps=1e-8,scale=False,schedular=None):
+    def __init__(self,_, m, n,__, lr=1e-4, beta1=0.9, beta2=0.998, eps=1e-8,scale=False,schedular=None):
         self.m = m
         self.n = n
         self.scale=scale
