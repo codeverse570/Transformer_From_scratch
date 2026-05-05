@@ -22,10 +22,10 @@ class Transformer :
          
          self.decoder= Decoder(d_model,d_ff,h_count,voc_size,max_len,layers,batch_size,schedular=self.schedular)
          self.encoder= Encoder(d_model,h_count,d_ff,voc_size,max_len,layers,batch_size,schedular=self.schedular)
-         nn.init.xavier_normal_(self.emb.weight)
-         nn.init.xavier_normal_(self.pos.weight)
-        #  nn.init.normal_(self.emb.weight, mean=0, std=d_model ** -0.5)
-        #  nn.init.normal_(self.pos.weight, mean=0, std=d_model ** -0.5)
+        #  nn.init.xavier_normal_(self.emb.weight)
+        #  nn.init.xavier_normal_(self.pos.weight)
+         nn.init.normal_(self.emb.weight, mean=0, std=d_model ** -0.5)
+         nn.init.normal_(self.pos.weight, mean=0, std=d_model ** -0.5)
     def fit(self,encoder_inputs,decoder_inputs,targets):
          
          self.decoder.emb=self.emb
