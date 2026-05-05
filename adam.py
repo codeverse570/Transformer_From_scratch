@@ -40,13 +40,6 @@ class AdamCustom:
 
     def grad(self, G, W):
         # init state
-        
-       norm = G.norm(2)
-      
-       
-       if norm > 1.0:
-           
-           G = G * (1.0 / (norm + 1e-6))
        step=0
        if (len(G.shape)==2):
         if 'm_t' not in self.state:

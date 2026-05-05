@@ -402,6 +402,7 @@ class Decoder(nn.Module):
     
         delta_H = delta_z@ self.emb.weight
         delta_H= delta_H
+    
         # print("decoder ",delta_H.abs().mean())A
          # check= self.W_voc.clone()
         # W_voc_grad=self.W_voc_ada.grad(delta_W_voc,self.W_voc.weight)
@@ -608,7 +609,7 @@ class Decoder(nn.Module):
             #     # print(abs_mean(self.W_norm_ff_a[layer] ),abs_mean(self.W_norm_ff_a_ada[layer].grad(ff_alpha_grad)))
             #     # print(abs_mean(self.W_norm_ff_b[layer] ),abs_mean(self.W_norm_ff_b_ada[layer].grad(ff_beta_grad)))
             #     pass
-        # print(prev_delta)
+        print(prev_delta)
         prev_delta= self.dropout['emb'].backward(prev_delta)
         flat_tokens = torch.tensor(self.D, device=device).view(-1)          # (B*T,)
         flat_delta  = prev_delta.view(-1, self.d_model)                      # (B*T, d_model)
@@ -637,8 +638,8 @@ class Decoder(nn.Module):
                 store['self_alpha'], store['self_beta'],
             ]
 
-        coef = self.clip_grad_norm(all_grads, max_norm)   # ← single global coef
-
+        coef = 1  # ← single global coef
+        
     # ─────────────────────────────────────────
     # PHASE 3 — apply clipped updates
     # ─────────────────────────────────────────
@@ -927,6 +928,7 @@ class Decoder(nn.Module):
     def clip_grad_norm(self, all_grads, max_norm=1.0):
         """Compute global norm across all gradients and return clip coefficient."""
         total_norm = 0.0
+        print(all_grads[0])
         for g in all_grads:
             if g is not None:
                 total_norm += g.norm(2) ** 2

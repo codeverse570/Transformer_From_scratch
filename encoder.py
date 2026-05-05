@@ -283,7 +283,7 @@ class Encoder():
                 store['att_alpha'], store['att_beta'],
             ]
 
-         coef = self.clip_grad_norm(all_grads, max_norm)   # ← single global coef for encoder
+         coef = 1 # ← single global coef for encoder
 
     # ─────────────────────────────────────────
     # PHASE 3 — apply clipped updates

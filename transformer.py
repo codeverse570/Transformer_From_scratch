@@ -85,7 +85,6 @@ if __name__ == "__main__":
              with torch.no_grad():
                  loss= model.fit(x_train_encoder[i:i+64],x_train_decoder[i:i+64],x_train_target[i:i+64])
                  total_loss+=loss
-                #  print(iteration)
                  iteration+=1
          
             
