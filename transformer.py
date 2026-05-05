@@ -45,7 +45,7 @@ class Transformer :
     #      print(f"loss:- {loss} | iteration:- {iteration}")
         #  print(del_E)
          enc_emb_grad,enc_pos_grad,encoder_all_grads=self.encoder.back_pre(del_E, E,encoder_inputs)
-         coef= self.clip_grad_norm(decoder_all_grads+encoder_all_grads)
+         coef= self.clip_grad_norm(decoder_all_grads+encoder_all_grads+[(dec_emb_grad+enc_emb_grad)])
          self.encoder.update_weights(coef)
          self.decoder.update_weights(coef)
          self.emb.weight-= self.emb_ad.grad(coef*(dec_emb_grad+enc_emb_grad),self.emb)
