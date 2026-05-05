@@ -3,7 +3,7 @@ import math
 import torch
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class SchedulerState:
-    def __init__(self, base_lr, warmup_steps=4000, total_steps=100000):
+    def __init__(self, base_lr, warmup_steps=4000, total_steps=1000000):
         self.global_step = 0
         self.base_lr = base_lr
         self.warmup_steps = warmup_steps
@@ -21,7 +21,7 @@ class SchedulerState:
             scale = max(0.05, 0.5 * (1.0 + math.cos(math.pi * progress)))
         return self.base_lr * scale
 class AdamCustom:
-    def __init__(self,_, m, n,__, lr=1e-4, beta1=0.9, beta2=0.998, eps=1e-8,scale=False,schedular=None):
+    def __init__(self,_, m, n,__, lr=1e-4, beta1=0.9, beta2=0.999, eps=1e-9,scale=False,schedular=None):
         self.m = m
         self.n = n
         self.scale=scale
