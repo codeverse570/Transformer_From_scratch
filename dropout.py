@@ -15,6 +15,7 @@ class Dropout:
         return x * mask / (1 - self.p)
 
     def backward(self, grad_out):
+        
         mask = self.masks.pop()
           # LIFO matches reverse-layer backprop order
         if mask is None:

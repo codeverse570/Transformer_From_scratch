@@ -34,6 +34,7 @@ class Transformer :
          self.encoder.pos= self.pos
          self.decoder.train()
          self.encoder.train()
+
          E,E_pad_mask = self.encoder.fit_pre(encoder_inputs)
          
          prob = self.decoder.fit_pre(decoder_inputs, E,E_pad_mask)
