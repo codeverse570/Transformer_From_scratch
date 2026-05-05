@@ -120,56 +120,56 @@ def create_decoder_inputs_targets(sequences, max_len, pad_id=0, bos_id=2, eos_id
     return decoder_inputs, decoder_targets
 
 if __name__ == "__main__":
-    # ds = load_dataset(DATASET_NAME, DATASET_CONFIG)
-    # print(ds.keys())
-    # train_encoder_input_raw,train_decoder_input_raw=create_train_samples(ds)
-    # with open("./translation_data/raw_data/train_encoder_input.json","w") as file:
-    #   json.dump(train_encoder_input_raw,file)
-    # with open("./translation_data/raw_data/train_decoder_input.json","w") as file:
-    #   json.dump(train_decoder_input_raw,file)
+    ds = load_dataset(DATASET_NAME, DATASET_CONFIG)
+    print(ds.keys())
+    train_encoder_input_raw,train_decoder_input_raw=create_train_samples(ds)
+    with open("./translation_data/raw_data/train_encoder_input.json","w") as file:
+      json.dump(train_encoder_input_raw,file)
+    with open("./translation_data/raw_data/train_decoder_input.json","w") as file:
+      json.dump(train_decoder_input_raw,file)
     
-    # # build_tokenizer(ds,'./bpe_translation.json',VOCAB_SIZE)
-    # i=0
-    # print(train_decoder_input_raw[0])
-    # # train_encoder_input=manual_pad_and_truncate(train_encoder_input_raw,512,3)
-    # train_encoder_input = manual_pad_and_truncate(
-    # train_encoder_input_raw, 128,3
-    # )
+    # build_tokenizer(ds,'./bpe_translation.json',VOCAB_SIZE)
+    i=0
+    print(train_decoder_input_raw[0])
+    # train_encoder_input=manual_pad_and_truncate(train_encoder_input_raw,512,3)
+    train_encoder_input = manual_pad_and_truncate(
+    train_encoder_input_raw, 128,3
+    )
 
-    # train_decoder_input, train_decoder_target = create_decoder_inputs_targets(
-    #     train_decoder_input_raw, 128
-    # )
-    # print(train_decoder_input_raw[0])
-    # with open("./translation_data/train/train_encoder_input.json","w") as file:
-    #   json.dump(train_encoder_input,file)
-    # with open("./translation_data/train/train_decoder_input.json","w") as file:
-    #   json.dump(train_decoder_input,file)
-    # with open("./translation_data/train/train_decoder_target.json","w") as file:
-    #   json.dump(train_decoder_target,file)
-    # validation_encoder_input_raw,validation_decoder_input_raw=create_validation_samples(ds)
-    # with open("./translation_data/raw_data/validation_encoder_input.json","w") as file:
-    #   json.dump(validation_encoder_input_raw,file)
-    # with open("./translation_data/raw_data/validation_decoder_input.json","w") as file:
-    #   json.dump(validation_decoder_input_raw,file)
+    train_decoder_input, train_decoder_target = create_decoder_inputs_targets(
+        train_decoder_input_raw, 128
+    )
+    print(train_decoder_input_raw[0])
+    with open("./translation_data/train/train_encoder_input.json","w") as file:
+      json.dump(train_encoder_input,file)
+    with open("./translation_data/train/train_decoder_input.json","w") as file:
+      json.dump(train_decoder_input,file)
+    with open("./translation_data/train/train_decoder_target.json","w") as file:
+      json.dump(train_decoder_target,file)
+    validation_encoder_input_raw,validation_decoder_input_raw=create_validation_samples(ds)
+    with open("./translation_data/raw_data/validation_encoder_input.json","w") as file:
+      json.dump(validation_encoder_input_raw,file)
+    with open("./translation_data/raw_data/validation_decoder_input.json","w") as file:
+      json.dump(validation_decoder_input_raw,file)
     
-    # # build_tokenizer(ds,'./bpe_translation.json',VOCAB_SIZE)
-    # i=0
-    # print(validation_decoder_input_raw[0])
-    # # validation_encoder_input=manual_pad_and_truncate(validation_encoder_input_raw,512,3)
-    # validation_encoder_input = manual_pad_and_truncate(
-    # validation_encoder_input_raw, 128,3
-    # )
+    # build_tokenizer(ds,'./bpe_translation.json',VOCAB_SIZE)
+    i=0
+    print(validation_decoder_input_raw[0])
+    # validation_encoder_input=manual_pad_and_truncate(validation_encoder_input_raw,512,3)
+    validation_encoder_input = manual_pad_and_truncate(
+    validation_encoder_input_raw, 128,3
+    )
 
-    # validation_decoder_input, validation_decoder_target = create_decoder_inputs_targets(
-    #     validation_decoder_input_raw, 128
-    # )
-    # print(validation_decoder_input_raw[0])
-    # with open("./translation_data/validation/validation_encoder_input.json","w") as file:
-    #   json.dump(validation_encoder_input,file)
-    # with open("./translation_data/validation/validation_decoder_input.json","w") as file:
-    #   json.dump(validation_decoder_input,file)
-    # with open("./translation_data/validation/validation_decoder_target.json","w") as file:
-    #   json.dump(validation_decoder_target,file)
+    validation_decoder_input, validation_decoder_target = create_decoder_inputs_targets(
+        validation_decoder_input_raw, 128
+    )
+    print(validation_decoder_input_raw[0])
+    with open("./translation_data/validation/validation_encoder_input.json","w") as file:
+      json.dump(validation_encoder_input,file)
+    with open("./translation_data/validation/validation_decoder_input.json","w") as file:
+      json.dump(validation_decoder_input,file)
+    with open("./translation_data/validation/validation_decoder_target.json","w") as file:
+      json.dump(validation_decoder_target,file)
     
     # for sent in validation_encoder_input:
     #     print(len(sent))

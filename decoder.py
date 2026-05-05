@@ -36,7 +36,7 @@ class Decoder(nn.Module):
         self.sent_len = sent_len
         self.layers = layers
         self.batch_size = batch_size
-        self.dropout= {'emb':Dropout(),'emb_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+        self.dropout= {'emb':Dropout(),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
         self.pad_mask=[]
@@ -261,14 +261,14 @@ class Decoder(nn.Module):
         inputs= self.dropout['emb'].train(self.is_training).forward(inputs)
         # inputs = embeddings+ self.sin_pos[:len(X[0])]
         # inputs = embeddings
-        
+        E= self.dropout['enc_out'].train(self.is_training).forward(E)
+        self.E = E
 
         # NEW: store residual inputs (needed for correct gradients later)
         self.residual_self = []
         self.residual_cross = []
         self.residual_ff = []
-        E= self.dropout['emb_out'].train(self.is_training).forward(E)
-        self.E = E
+        
         for layer in range(self.layers):
 
             # =========================
@@ -373,7 +373,7 @@ class Decoder(nn.Module):
         return prob
 
 
-    def back_pre(self, targets, prob, smoothing=0.1, max_norm=1.0):
+    def back_pre(self, targets, prob, smoothing=0.1,max_norm=1):
 
 
         # rescaled_targets = np.expand_dims(targets, axis=-1)
@@ -402,7 +402,6 @@ class Decoder(nn.Module):
     
         delta_H = delta_z@ self.emb.weight
         delta_H= delta_H
-    
         # print("decoder ",delta_H.abs().mean())A
          # check= self.W_voc.clone()
         # W_voc_grad=self.W_voc_ada.grad(delta_W_voc,self.W_voc.weight)
@@ -420,8 +419,9 @@ class Decoder(nn.Module):
 
         prev_delta = delta_H
         # print(prev_delta.abs().mean())
+
         del_E = torch.zeros((self.batch_size, self.sent_len, self.d_model),device=device) 
-        layer_grad_store = []  
+        layer_grad_store = []
         for layer in range(self.layers - 1, -1, -1):
             # print(f"layer {layer}")
             # =========================
@@ -532,6 +532,10 @@ class Decoder(nn.Module):
             )
 
             prev_delta = delta_residual + delta_ln_self
+            # print(prev_delta.abs().mean())
+            # =========================
+            # 🔹 WEIGHT UPDATES
+            # =========================
             layer_grad_store.append({
             'layer': layer,
             # FF
@@ -553,10 +557,6 @@ class Decoder(nn.Module):
             # Self norm
             'self_alpha': self_alpha_grad, 'self_beta': self_beta_grad,
         })
-            # print(prev_delta.abs().mean())
-            # =========================
-            # 🔹 WEIGHT UPDATES
-            # =========================
             # with torch.no_grad():
             #     # FF
             #     self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(ff_w1_grad,self.W_ff1[layer].weight)
@@ -609,22 +609,15 @@ class Decoder(nn.Module):
             #     # print(abs_mean(self.W_norm_ff_a[layer] ),abs_mean(self.W_norm_ff_a_ada[layer].grad(ff_alpha_grad)))
             #     # print(abs_mean(self.W_norm_ff_b[layer] ),abs_mean(self.W_norm_ff_b_ada[layer].grad(ff_beta_grad)))
             #     pass
-        print(prev_delta)
-        prev_delta= self.dropout['emb'].backward(prev_delta)
-        flat_tokens = torch.tensor(self.D, device=device).view(-1)          # (B*T,)
-        flat_delta  = prev_delta.view(-1, self.d_model)                      # (B*T, d_model)
-        emb_grad  = torch.zeros(self.voc_size, self.d_model, device=device)
+        # print(prev_delta)
+        del_E= self.dropout['enc_out'].train(self.is_training).backward(del_E)
+        prev_delta  = self.dropout['emb'].backward(prev_delta)
+        flat_tokens = torch.tensor(self.D, device=device).view(-1)
+        flat_delta  = prev_delta.view(-1, self.d_model)
+        emb_grad    = torch.zeros(self.voc_size, self.d_model, device=device)
         emb_grad.index_add_(0, flat_tokens, flat_delta)
+        delta_W_voc += emb_grad
         
-        # counts = torch.zeros(self.voc_size, device=device)
-        # counts.index_add_(0, flat_tokens, torch.ones(flat_tokens.shape[0], device=device))
-        # counts = counts.clamp(min=1)
-        # W_voc_grad = W_voc_grad / counts.unsqueeze(1)
-        # rows_list   = flat_tokens.unique().tolist()
-        # emb_grad = self.emb_ad.grad_emb(W_voc_grad[rows_list], rows_list,self.emb.weight[rows_list])
-        # pos_grad = self.pos_ada.grad(torch.sum(prev_delta, dim=0),self.pos.weight)
-        delta_W_voc+= emb_grad
-        del_E= self.dropout['emb_out'].train(self.is_training).backward(del_E)
         all_grads = [delta_W_voc]
         for store in layer_grad_store:
             all_grads += [
@@ -638,11 +631,7 @@ class Decoder(nn.Module):
                 store['self_alpha'], store['self_beta'],
             ]
 
-        coef = 1  # ← single global coef
-        
-    # ─────────────────────────────────────────
-    # PHASE 3 — apply clipped updates
-    # ─────────────────────────────────────────
+        coef = self.clip_grad_norm(all_grads, max_norm)
         for store in layer_grad_store:
             layer = store['layer']
             with torch.no_grad():
@@ -678,16 +667,7 @@ class Decoder(nn.Module):
                 # Self norm
                 self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef, self.W_norm_self_a[layer])
                 self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef, self.W_norm_self_b[layer])
-
-        # self.emb.weight -= self.W_voc_ada.grad(delta_W_voc,self.emb.weight) 
-        # self.pos.weight -= pos_grad
-        # print(self.emb.weight.abs().mean())
         
-        # FIX: release all cached activation tensors and per-batch state
-        #      so iteration N+1 starts with exactly the same memory footprint as iteration N.
-        # self.clear_memory()
-        # At the end of back_pre, before return:
-        # print(len(self.self_att_a), len(self.cross_att_a))
         return del_E,loss,coef*delta_W_voc,torch.sum(prev_delta, dim=0)*coef
 
     # ─────────────────────────────────────────────
@@ -715,12 +695,16 @@ class Decoder(nn.Module):
     def gradient_softmax_cross_entropy(self, targets, prob, smoothing=0.1):
         targets = torch.tensor(targets, device=device)
         B, T, V = prob.shape
-        eps = smoothing
-        delta_z = prob.clone()
 
-        delta_z[torch.arange(B)[:,None], torch.arange(T), targets] -= 1.0
-        # delta_z[torch.arange(B)[:, None], torch.arange(T), targets] -= (1.0 - smoothing)
-        delta_z = delta_z * (1 - eps) + eps / V
+        delta_z = prob.clone()  # ∂(-mean log p)/∂z_j = p_j - 1/V, so starting with p is right
+
+        # (1-ε) term: subtract 1 at correct token
+        delta_z[torch.arange(B)[:, None], torch.arange(T), targets] -= (1.0 - smoothing)
+
+        # ε term: gradient of -ε * mean(log p) w.r.t z_j = ε*(p_j - 1/V)
+        # p_j is already in delta_z; just subtract ε/V
+        delta_z -= smoothing / V   # the +ε*p_j part is already implicitly there via the clone
+
         return delta_z
 
         # subtract smoothing/V from every vocab position
@@ -728,7 +712,9 @@ class Decoder(nn.Module):
         # mathematically: d/dz [ -eps * mean(log p) ] = eps/V * (p - 1/p... )
         # simplified: just subtract eps/V from every position since d(-log p_i)/dz_j = p_j - 1_{i==j}
         # summed uniformly: p_j - 1/V  →  already captured by subtracting 1/V
-                                   # (B, T, V)
+        delta_z -= smoothing / V
+
+        return delta_z                                        # (B, T, V)
 
     def gradient_W_voc(self, delta_z):
     #    return torch.einsum('bti,btj->ij', self.H, delta_z)
@@ -898,6 +884,16 @@ class Decoder(nn.Module):
         var = X.var(dim=-1, keepdim=True, unbiased=False)
         std = torch.sqrt(var + self.epsilon)
         return ((X - mean) / std) * alpha + beta
+    def clip_grad_norm(self, all_grads, max_norm=1.0):
+        """Compute global norm across all encoder gradients and return clip coefficient."""
+        total_norm = 0.0
+        for g in all_grads:
+            if g is not None:
+                total_norm += g.norm(2).item() ** 2
+        total_norm = total_norm ** 0.5
+        clip_coef = min(1.0, max_norm / (total_norm + 1e-6))
+        # print(f"[Encoder ClipGrad] global_norm={total_norm:.4f}, coef={clip_coef:.4f}")
+        return clip_coef
     def create_pad_mask_q(self, X):
             if not isinstance(X, torch.Tensor):
                 X = torch.tensor(X, device=device)
@@ -925,17 +921,6 @@ class Decoder(nn.Module):
     # ─────────────────────────────────────────────
     # Memory management
     # ─────────────────────────────────────────────
-    def clip_grad_norm(self, all_grads, max_norm=1.0):
-        """Compute global norm across all gradients and return clip coefficient."""
-        total_norm = 0.0
-        print(all_grads[0])
-        for g in all_grads:
-            if g is not None:
-                total_norm += g.norm(2) ** 2
-        total_norm = total_norm ** 0.5
-        clip_coef = min(1.0, max_norm / (total_norm + 1e-6))
-        # print(f"[ClipGrad] global_norm={total_norm:.4f}, coef={clip_coef:.4f}")
-        return clip_coef
     def clear_memory(self):
         """Release all activation caches and per-batch state tensors."""
         self.ff_output.clear()
@@ -968,7 +953,6 @@ class Decoder(nn.Module):
         self.dropout['cross_att_out'].clear()
         self.dropout['ff_layer_1'].clear()
         self.dropout['ff_out'].clear()
-        self.dropout['emb_out'].clear()
         
         # FIX: also null out per-batch state so GC can free these tensors
         self.H = None

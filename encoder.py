@@ -147,7 +147,7 @@ class Encoder():
         # store residuals (needed if you later fix backward fully)
         self.residual_att = []
         self.residual_ff = []
-        
+
         for layer in range(self.layers):
         
             # =========================
@@ -225,6 +225,8 @@ class Encoder():
              att_delta_out= (att_delta_X_v+att_delta_X_k+att_delta_X_q)
              del_att_r,del_att_alpha,del_att_beta= self.grad_layer_norm_pre(att_delta_out,self.W_norm_att_a[layer],self.W_norm_att_b[layer],self.residual_att[layer])
              new_delta =del_att_r+att_delta_in
+             
+
              layer_grad_store.append({
             'layer': layer,
             # FF
@@ -240,9 +242,7 @@ class Encoder():
             'sv_b': att_delta_W_v_b, 'so_b': att_delta_W_o_b,
             # Attention norm
             'att_alpha': del_att_alpha, 'att_beta': del_att_beta,
-        })  
-
-           
+        })
             #  self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(ff_w1_grad,self.W_ff1[layer].weight)
             #  self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(ff_w2_grad,self.W_ff2[layer].weight)
             #             #  self.W_ff1[layer].weight -= 0.001*ff_w1_grad
@@ -274,44 +274,44 @@ class Encoder():
          W_voc_grad.index_add_(0, flat_tokens, flat_delta)
          all_grads = [W_voc_grad]
          for store in layer_grad_store:
-            all_grads += [
-                store['ff_w1'],  store['ff_b1'],
-                store['ff_w2'],  store['ff_b2'],
-                store['ff_alpha'], store['ff_beta'],
-                store['sq'],  store['sk'],  store['sv'],  store['so'],
-                store['sq_b'], store['sk_b'], store['sv_b'], store['so_b'],
-                store['att_alpha'], store['att_beta'],
-            ]
+                all_grads += [
+                    store['ff_w1'],  store['ff_b1'],
+                    store['ff_w2'],  store['ff_b2'],
+                    store['ff_alpha'], store['ff_beta'],
+                    store['sq'],  store['sk'],  store['sv'],  store['so'],
+                    store['sq_b'], store['sk_b'], store['sv_b'], store['so_b'],
+                    store['att_alpha'], store['att_beta'],
+                ]
 
-         coef = 1 # ← single global coef for encoder
+         coef = self.clip_grad_norm(all_grads, max_norm)   # ← single global coef for encoder
 
-    # ─────────────────────────────────────────
-    # PHASE 3 — apply clipped updates
-    # ─────────────────────────────────────────
+                # ─────────────────────────────────────────
+                # PHASE 3 — apply clipped updates
+                # ─────────────────────────────────────────
          for store in layer_grad_store:
-                layer = store['layer']
-                with torch.no_grad():
-                    # FF weights
-                    self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
-                    self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
-                    self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
-                    self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
-                    # FF norm
-                    self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
-                    self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
-                    # Self attention weights
-                    self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'] * coef, self.W_q[layer].weight)
-                    self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'] * coef, self.W_k[layer].weight)
-                    self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'] * coef, self.W_v[layer].weight)
-                    self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'] * coef, self.W_o[layer].weight)
-                    # Self attention biases
-                    self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
-                    self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
-                    self.W_v[layer].bias -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
-                    self.W_o[layer].bias -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
-                    # Attention norm
-                    self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['att_alpha'] * coef, self.W_norm_att_a[layer])
-                    self.W_norm_att_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['att_beta']  * coef, self.W_norm_att_b[layer])
+                    layer = store['layer']
+                    with torch.no_grad():
+                        # FF weights
+                        self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
+                        self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
+                        self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
+                        self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
+                        # FF norm
+                        self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
+                        self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
+                        # Self attention weights
+                        self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'] * coef, self.W_q[layer].weight)
+                        self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'] * coef, self.W_k[layer].weight)
+                        self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'] * coef, self.W_v[layer].weight)
+                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'] * coef, self.W_o[layer].weight)
+                        # Self attention biases
+                        self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
+                        self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
+                        self.W_v[layer].bias -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
+                        self.W_o[layer].bias -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
+                        # Attention norm
+                        self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['att_alpha'] * coef, self.W_norm_att_a[layer])
+                        self.W_norm_att_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['att_beta']  * coef, self.W_norm_att_b[layer])
 
         #  counts = torch.zeros(self.voc_size, device=device)
         #  counts.index_add_(0, flat_tokens, torch.ones(flat_tokens.shape[0], device=device))
@@ -448,12 +448,6 @@ class Encoder():
        Z= O@self.W_o[layer].weight+ self.W_o[layer].bias
        
        return Z, O .clone(), Q .clone(), K .clone(), V .clone(), S, A,raw_A
-    
-    def layer_norm(self, X, alpha, beta):
-        mean = X.mean(dim=-1, keepdim=True)          # ← fix dim
-        var  = X.var(dim=-1, keepdim=True, unbiased=False)
-        std  = torch.sqrt(var + self.epsilon)
-        return (X - mean) / std * alpha + beta 
     def clip_grad_norm(self, all_grads, max_norm=1.0):
         """Compute global norm across all encoder gradients and return clip coefficient."""
         total_norm = 0.0
@@ -463,7 +457,13 @@ class Encoder():
         total_norm = total_norm ** 0.5
         clip_coef = min(1.0, max_norm / (total_norm + 1e-6))
         # print(f"[Encoder ClipGrad] global_norm={total_norm:.4f}, coef={clip_coef:.4f}")
-        return clip_coef 
+        return clip_coef
+    
+    def layer_norm(self, X, alpha, beta):
+        mean = X.mean(dim=-1, keepdim=True)          # ← fix dim
+        var  = X.var(dim=-1, keepdim=True, unbiased=False)
+        std  = torch.sqrt(var + self.epsilon)
+        return (X - mean) / std * alpha + beta  
     def create_pad_mask_k(self, X):
         if not isinstance(X, torch.Tensor):
             X = torch.tensor(X, device=device)
