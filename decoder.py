@@ -376,7 +376,7 @@ class Decoder(nn.Module):
         return prob
 
 
-    def back_pre(self, targets, prob, smoothing=0,max_norm=1):
+    def back_pre(self, targets, prob, smoothing=0.1,max_norm=1):
 
 
         # rescaled_targets = np.expand_dims(targets, axis=-1)
