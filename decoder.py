@@ -841,7 +841,7 @@ class Decoder(nn.Module):
         Q = (x @ self.W_q[layer].weight+self.W_q[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
         K = (x @ self.W_k[layer].weight+self.W_k[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         V = (x @ self.W_v[layer].weight+self.W_v[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-        temp=1.5
+        temp=1
         S = Q @ K.transpose(-2, -1) /(math.sqrt(self.d_k)*temp)  
         pad_mask = torch.tensor(self.pad_mask_k|self.pad_mask_q, dtype=torch.bool, device=device)    # (B, H, T, T)
         S = S + self.causal_mask[:T, :T]
@@ -868,7 +868,7 @@ class Decoder(nn.Module):
         Q = (z1 @ Wq+Wq_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         K = (E @ Wk+Wk_b).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
         V = (E @ Wv+Wv_b).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
-        temp=1.5
+        temp=1
         S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
         # S = S - S.max(dim=-1, keepdim=True)[0]
         pad_mask = torch.tensor(E_pad_mask|self.pad_mask_q, dtype=torch.bool, device=device) 
