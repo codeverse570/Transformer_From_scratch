@@ -88,7 +88,7 @@ if __name__ == "__main__":
     # iteration=1
     epoch = 11
 
-    # model= Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000, max_len=128, layers=3, batch_size=64)
+    model= Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000, max_len=128, layers=3, batch_size=64)
     # model=  torch.load('./models/transformer-20.pth',weights_only=False) 
     # # print("hello")
     iteration=0
