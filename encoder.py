@@ -430,7 +430,7 @@ class Encoder():
        Q = (X @ Wq+Wq_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
        K = (X @ Wk+Wk_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
        V = (X @ Wv+Wv_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-       temp=2
+       temp=1
        
        S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
     #    S = S - S.max(dim=-1, keepdim=True)[0]
