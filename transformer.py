@@ -84,17 +84,23 @@ if __name__ == "__main__":
     with open('translation_data/validation/validation_decoder_target.json', 'rb') as file:
         x_validation_target = np.array(json.load(file))
 
-    test_batch=x_train_encoder[2:3]
+    test_batch=x_train_encoder[100:101]
     # iteration=1
     epoch = 11
 
-    model= Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000, max_len=128, layers=3, batch_size=64)
-    # model=  torch.load('./models/transformer-20.pth',weights_only=False) 
+    # model= Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000, max_len=128, layers=3, batch_size=64)
+    model=  torch.load('./models/transformer-20.pth',weights_only=False) 
     # # print("hello")
     iteration=0
     start_time = time.perf_counter()
     total_iteration= len(x_train_encoder)//64
-    
+    samples = [
+        "Hello, how are you?",
+        "The weather is nice today.",
+        "I would like to order a coffee.",
+        "The quick brown fox jumps over the lazy dog.",
+         ]
+    tokenizer=Tokenizer.from_file("bpe_translation.json")
     while epoch!=61:
          total_loss=0
          iteration=1
@@ -109,20 +115,16 @@ if __name__ == "__main__":
          end_time= time.perf_counter()
          total_time= end_time-start_time
          print(f"total time:- {total_time:.1f}")
-        #  if(epoch%5==0):
-        #     torch.save(model,f'../workspace/models/transformer-{epoch}.pth')
+         if(epoch%5==0):
+            torch.save(model,f'../workspace/models/transformer-{epoch}.pth')
 
          print(f"loss:- {total_loss/total_iteration} | epoch:- {epoch}")
          epoch+=1
        
          print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
-    samples = [
-        "Hello, how are you?",
-        "The weather is nice today.",
-        "I would like to order a coffee.",
-        "The quick brown fox jumps over the lazy dog.",
-         ]
-    tokenizer=Tokenizer.from_file("bpe_translation.json")
-    sample=np.array([tokenizer.encode(samples[1]).ids+[0]*(128-len(tokenizer.encode(samples[1])))])
-    print(predict(sample,x_train_encoder[2:3],model.encoder,model.decoder))
+         for i in range(len(samples)):
+          sample=np.array([tokenizer.encode(samples[i]).ids+[0]*(128-len(tokenizer.encode(samples[i])))])
+          print(predict(sample,x_train_encoder[100:101],model.encoder,model.decoder))
+    sample=np.array([tokenizer.encode(samples[0]).ids+[0]*(128-len(tokenizer.encode(samples[1])))])
+    print(predict(test_batch,x_train_encoder[100:101],model.encoder,model.decoder))
     print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
