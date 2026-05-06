@@ -137,7 +137,7 @@ class Encoder():
         self.clear_memory()
         self.pad_mask_k=self.create_pad_mask_k(x)
         self.pad_mask_q= self.create_pad_mask_q(x)
-        x_encodings = self.emb.weight[x]* math.sqrt(self.d_model)
+        x_encodings = self.emb.weight[x]
         x_encodings = x_encodings + (self.pos.weight)
         # x_encodings = x_encodings*torch.sqrt(self.d_model) + self.sin_pos* 0.02
 

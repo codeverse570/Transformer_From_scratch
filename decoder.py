@@ -196,7 +196,7 @@ class Decoder(nn.Module):
             for m in [
                       layer_mat_W_k, layer_mat_W_q, layer_mat_W_v, layer_mat_W_o,
                       layer_cross_W_k, layer_cross_W_q, layer_cross_W_v, layer_cross_W_o,layer_ff_W1,layer_ff_W2]:
-                nn.init.xavier_uniform_(m.weight)
+                nn.init.normal_(m.weight,mean=0.0,std=0.02)
                 nn.init.zeros_(m.bias)
 
             W_q.append(layer_mat_W_q)
@@ -258,7 +258,7 @@ class Decoder(nn.Module):
         # print(self.emb.weight.shape)
         self.pad_mask_q= self.create_pad_mask_q(X)
         self.pad_mask_k = self.create_pad_mask_k(X)
-        embeddings = self.emb.weight[X]* math.sqrt(self.d_model)
+        embeddings = self.emb.weight[X]
         self.D = X
         inputs = embeddings+ self.pos.weight[:len(X[0])]
         inputs= self.dropout['emb'].train(self.is_training).forward(inputs)
