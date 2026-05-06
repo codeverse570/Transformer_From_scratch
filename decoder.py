@@ -36,7 +36,7 @@ class Decoder(nn.Module):
         self.sent_len = sent_len
         self.layers = layers
         self.batch_size = batch_size
-        self.dropout= {'emb':Dropout(0),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+        self.dropout= {'emb':Dropout(0),'enc_out':Dropout(),'self_att_a':Dropout(0.15),'self_att_out':Dropout(),'cross_att_a':Dropout(0.15),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
         
@@ -376,7 +376,7 @@ class Decoder(nn.Module):
         return prob
 
 
-    def back_pre(self, targets, prob, smoothing=0,max_norm=1):
+    def back_pre(self, targets, prob, smoothing=0.1,max_norm=1):
 
 
         # rescaled_targets = np.expand_dims(targets, axis=-1)
