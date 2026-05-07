@@ -377,7 +377,7 @@ class Decoder(nn.Module):
         # targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
         # # print(targets_t.shape)
         # mask = (targets_t != 0)
-        log_prob = F.log_softmax(self.logits, dim=-1)   # your current approach (less stable)
+        log_prob = F.log_softmax(logits, dim=-1)   # your current approach (less stable)
 
         targets_t = torch.tensor(targets, dtype=torch.long, device=device).unsqueeze(-1)
         mask = (targets_t != 0)
