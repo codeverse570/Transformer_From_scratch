@@ -196,7 +196,7 @@ class Decoder(nn.Module):
             for m in [
                       layer_mat_W_k, layer_mat_W_q, layer_mat_W_v, layer_mat_W_o,
                       layer_cross_W_k, layer_cross_W_q, layer_cross_W_v, layer_cross_W_o,layer_ff_W1,layer_ff_W2]:
-                nn.init.normal_(m.weight,mean=0.0,std=0.02)
+                nn.init.normal_(m.weight,mean=0.0,std=0.02/self.layers)
                 nn.init.zeros_(m.bias)
 
             W_q.append(layer_mat_W_q)

@@ -90,7 +90,7 @@ class Encoder():
           layer_att_norm_a = nn.Parameter(torch.ones(self.d_model, device=device))
           layer_att_norm_b = nn.Parameter(torch.zeros(self.d_model, device=device))
           for m in [layer_ff_W1,layer_ff_W2,layer_mat_W_k,layer_mat_W_q,layer_mat_W_v,layer_mat_W_o]:
-                 nn.init.normal_(m.weight,mean=0.0,std=0.02)
+                 nn.init.normal_(m.weight,mean=0.0,std=0.02/self.layers)
                  nn.init.zeros_(m.bias)
           W_q.append(layer_mat_W_q)
           W_k.append(layer_mat_W_k)
