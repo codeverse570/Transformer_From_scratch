@@ -1080,19 +1080,21 @@ def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_
 
             # ---------- forward passes ----------
             E,E_pad_mask    = encoder.fit_pre(enc_batch)
-            prob = decoder.fit_pre(dec_batch, E,E_pad_mask)
+            logits = decoder.fit_pre(dec_batch, E,E_pad_mask)
 
             # ---------- loss (mirrors your back_pre logic) ----------
             rescaled_targets = np.expand_dims(tgt_batch, axis=-1)
             targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
             # print(targets_t.shape)
-            tokens_prob = prob.gather(dim=-1, index=targets_t)
-            tokens_prob = torch.clamp(tokens_prob, min=1e-9)
-            log_tokens_prob = torch.log(tokens_prob)
-            # print(torch.tensor(targets).shape,log_tokens_prob.shape)
-            mask= (targets_t!=0)
-        
-            loss = (-torch.sum(log_tokens_prob*mask))/mask.sum()
+            log_prob = F.log_softmax(logits, dim=-1)   # your current approach (less stable)
+
+            mask = (targets_t != 0)
+
+            nll_loss    = -log_prob.gather(dim=-1, index=targets_t)       # (B, T, 1)
+            # smooth_loss = -log_prob.mean(dim=-1, keepdim=True)             # (B, T, 1)
+            
+            loss_per_token =  nll_loss 
+            loss = (loss_per_token * mask).sum() / mask.sum()
 
             total_loss  += loss.item()
             num_batches += 1
