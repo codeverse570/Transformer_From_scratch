@@ -20,7 +20,7 @@ class Transformer :
          self.pos= nn.Embedding(max_len,d_model,device=device)
          self.pos_ada = AdamCustom(0.99, max_len, d_model, 0.01,scale=True,schedular=self.schedular)
 
-         
+         self.d_model= d_model
          self.decoder= Decoder(d_model,d_ff,h_count,voc_size,max_len,layers,batch_size,schedular=self.schedular)
          self.encoder= Encoder(d_model,h_count,d_ff,voc_size,max_len,layers,batch_size,schedular=self.schedular)
         #  nn.init.xavier_normal_(self.emb.weight)
