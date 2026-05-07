@@ -65,45 +65,65 @@ class Encoder():
     #   nn.init.xavier_normal_(self.pos.weight)
 
     def intialize_weights(self):
-       W_q=[]
-       W_k=[]
-       W_v=[]
-       W_o=[]
-       W_ff1=[]
-       W_ff2=[]
-       W_norm_ff_a=[]
-       W_norm_ff_b=[]
-       W_norm_att_a=[]
-       W_norm_att_b=[]
-       for i in range(self.layers):
-          layer_mat_W_q = nn.Linear(self.d_model, self.d_model).to(device)
-          layer_mat_W_k = nn.Linear(self.d_model, self.d_model).to(device)
-          layer_mat_W_v = nn.Linear(self.d_model, self.d_model).to(device)
-          layer_mat_W_o = nn.Linear(self.d_model, self.d_model).to(device)
+        W_q, W_k, W_v, W_o = [], [], [], []
+        W_ff1, W_ff2 = [], []
+        W_norm_ff_a, W_norm_ff_b = [], []
+        W_norm_att_a, W_norm_att_b = [], []
 
-          layer_ff_W1 = nn.Linear(self.d_model, self.d_ff).to(device)
-          layer_ff_W2 = nn.Linear(self.d_ff, self.d_model).to(device)
+        std_qk    = 1.0 / math.sqrt(self.d_model)
+        std_general = 0.02
+        res_scale   = 1.0 / math.sqrt(2 * self.layers)
 
-          layer_ff_norm_a = nn.Parameter(torch.ones(self.d_model, device=device))
-          layer_ff_norm_b = nn.Parameter(torch.zeros(self.d_model, device=device))
+        for i in range(self.layers):
 
-          layer_att_norm_a = nn.Parameter(torch.ones(self.d_model, device=device))
-          layer_att_norm_b = nn.Parameter(torch.zeros(self.d_model, device=device))
-          for m in [layer_ff_W1,layer_ff_W2,layer_mat_W_k,layer_mat_W_q,layer_mat_W_v,layer_mat_W_o]:
-                 nn.init.normal_(m.weight,mean=0.0,std=0.02)
-                 nn.init.zeros_(m.bias)
-          W_q.append(layer_mat_W_q)
-          W_k.append(layer_mat_W_k)
-          W_v.append(layer_mat_W_v)
-          W_o.append(layer_mat_W_o)
-          W_ff1.append(layer_ff_W1)
-          W_ff2.append(layer_ff_W2)
-          W_norm_ff_a.append(layer_ff_norm_a)
-          W_norm_ff_b.append(layer_ff_norm_b)
-          W_norm_att_a.append(layer_att_norm_a)
-          W_norm_att_b.append(layer_att_norm_b)
-       return W_q,W_k,W_v,W_o,W_ff1,W_ff2,W_norm_ff_a,W_norm_ff_b,W_norm_att_a,W_norm_att_b
+            # ── Attention projections ──────────────────────────
+            Wq = nn.Linear(self.d_model, self.d_model, device=device)
+            Wk = nn.Linear(self.d_model, self.d_model, device=device)
+            Wv = nn.Linear(self.d_model, self.d_model, device=device)
+            Wo = nn.Linear(self.d_model, self.d_model, device=device)
 
+            # Q, K: unit variance dot products before 1/√d_k scaling
+            nn.init.normal_(Wq.weight, mean=0.0, std=std_qk)
+            nn.init.normal_(Wk.weight, mean=0.0, std=std_qk)
+
+            # V: standard scale, no amplification
+            nn.init.normal_(Wv.weight, mean=0.0, std=std_general)
+
+            # W_o: residual exit — scale down to prevent variance accumulation
+            nn.init.normal_(Wo.weight, mean=0.0, std=std_general * res_scale)
+
+            for m in [Wq, Wk, Wv, Wo]:
+                nn.init.zeros_(m.bias)
+
+            # ── Feed Forward ───────────────────────────────────
+            Wff1 = nn.Linear(self.d_model, self.d_ff,   device=device)
+            Wff2 = nn.Linear(self.d_ff,   self.d_model, device=device)
+
+            # W_ff1 → ReLU: He init compensates for dead neurons
+            nn.init.kaiming_normal_(Wff1.weight, mode='fan_in', nonlinearity='relu')
+
+            # W_ff2: residual exit — He + residual scale
+            nn.init.kaiming_normal_(Wff2.weight, mode='fan_in', nonlinearity='relu')
+            with torch.no_grad():
+                Wff2.weight *= res_scale
+
+            nn.init.zeros_(Wff1.bias)
+            nn.init.zeros_(Wff2.bias)
+
+            # ── Layer Norms ────────────────────────────────────
+            W_q.append(Wq);  W_k.append(Wk)
+            W_v.append(Wv);  W_o.append(Wo)
+            W_ff1.append(Wff1); W_ff2.append(Wff2)
+
+            W_norm_ff_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
+            W_norm_ff_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
+            W_norm_att_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
+            W_norm_att_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
+
+        return (W_q, W_k, W_v, W_o,
+                W_ff1, W_ff2,
+                W_norm_ff_a, W_norm_ff_b,
+                W_norm_att_a, W_norm_att_b)
     def intialize_optimizers(self):
        W_q_ada=[]
        W_k_ada=[]

@@ -1,4 +1,5 @@
 import json
+import math
 import time
 
 import numpy as np
@@ -24,8 +25,8 @@ class Transformer :
          self.encoder= Encoder(d_model,h_count,d_ff,voc_size,max_len,layers,batch_size,schedular=self.schedular)
         #  nn.init.xavier_normal_(self.emb.weight)
         #  nn.init.xavier_normal_(self.pos.weight)
-         nn.init.normal_(self.emb.weight, mean=0, std=0.02)
-         nn.init.normal_(self.pos.weight, mean=0, std=0.02)
+         nn.init.normal_(self.emb.weight, mean=0, std=1.0 / math.sqrt(self.d_model))
+         nn.init.normal_(self.pos.weight, mean=0, std= 0.01)
     def fit(self,encoder_inputs,decoder_inputs,targets):
          
          self.decoder.emb=self.emb

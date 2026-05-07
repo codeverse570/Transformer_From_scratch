@@ -151,73 +151,69 @@ class Decoder(nn.Module):
                 W_cross_q_ada, W_cross_k_ada, W_cross_v_ada, W_cross_o_ada)
     
     def intialize_weights(self):
-        W_q = []
-        W_k = []
-        W_v = []
-        W_o = []
-        W_cross_q = []
-        W_cross_k = []
-        W_cross_v = []
-        W_cross_o = []
-        W_ff1 = []
-        W_ff2 = []
-        W_norm_self_a = []
-        W_norm_self_b = []
-        W_norm_cross_a = []
-        W_norm_cross_b = []
-        W_norm_ff_a = []
-        W_norm_ff_b = []
+        W_q, W_k, W_v, W_o = [], [], [], []
+        W_cross_q, W_cross_k, W_cross_v, W_cross_o = [], [], [], []
+        W_ff1, W_ff2 = [], []
+        W_norm_self_a, W_norm_self_b = [], []
+        W_norm_cross_a, W_norm_cross_b = [], []
+        W_norm_ff_a, W_norm_ff_b = [], []
+
+        std_qk      = 1.0 / math.sqrt(self.d_model)
+        std_general = 0.02
+        res_scale   = 1.0 / math.sqrt(2 * self.layers)
 
         for i in range(self.layers):
+            # ── Attention projections ──────────────────────────
+            Wq  = nn.Linear(self.d_model, self.d_model, device=device)
+            Wk  = nn.Linear(self.d_model, self.d_model, device=device)
+            Wv  = nn.Linear(self.d_model, self.d_model, device=device)
+            Wo  = nn.Linear(self.d_model, self.d_model, device=device)
+            Wcq = nn.Linear(self.d_model, self.d_model, device=device)
+            Wck = nn.Linear(self.d_model, self.d_model, device=device)
+            Wcv = nn.Linear(self.d_model, self.d_model, device=device)
+            Wco = nn.Linear(self.d_model, self.d_model, device=device)
 
+            nn.init.normal_(Wq.weight,  mean=0.0, std=std_qk)
+            nn.init.normal_(Wk.weight,  mean=0.0, std=std_qk)
+            nn.init.normal_(Wcq.weight, mean=0.0, std=std_qk)
+            nn.init.normal_(Wck.weight, mean=0.0, std=std_qk)
 
-            layer_mat_W_q = nn.Linear(self.d_model, self.d_model).to(device)
-            layer_mat_W_k = nn.Linear(self.d_model, self.d_model).to(device)
-            layer_mat_W_v = nn.Linear(self.d_model, self.d_model).to(device)
-            layer_mat_W_o = nn.Linear(self.d_model, self.d_model).to(device)
+            nn.init.normal_(Wv.weight,  mean=0.0, std=std_general)
+            nn.init.normal_(Wcv.weight, mean=0.0, std=std_general)
 
-            layer_cross_W_q = nn.Linear(self.d_model, self.d_model).to(device)
-            layer_cross_W_k = nn.Linear(self.d_model, self.d_model).to(device)
-            layer_cross_W_v = nn.Linear(self.d_model, self.d_model).to(device)
-            layer_cross_W_o = nn.Linear(self.d_model, self.d_model).to(device)
+            # residual projections scaled down
+            nn.init.normal_(Wo.weight,  mean=0.0, std=std_general * res_scale)
+            nn.init.normal_(Wco.weight, mean=0.0, std=std_general * res_scale)
 
-            layer_ff_W1 = nn.Linear(self.d_model, self.d_ff).to(device)
-            layer_ff_W2 = nn.Linear(self.d_ff, self.d_model).to(device)
-
-            norm_self_a = nn.Parameter(torch.ones(self.d_model, device=device))
-            norm_self_b = nn.Parameter(torch.zeros(self.d_model, device=device))
-
-            norm_cross_a = nn.Parameter(torch.ones(self.d_model, device=device))
-            norm_cross_b = nn.Parameter(torch.zeros(self.d_model, device=device))
-
-            norm_ff_a = nn.Parameter(torch.ones(self.d_model, device=device))
-            norm_ff_b = nn.Parameter(torch.zeros(self.d_model, device=device))
-
-            for m in [
-                      layer_mat_W_k, layer_mat_W_q, layer_mat_W_v, layer_mat_W_o,
-                      layer_cross_W_k, layer_cross_W_q, layer_cross_W_v, layer_cross_W_o,layer_ff_W1,layer_ff_W2]:
-                nn.init.normal_(m.weight,mean=0.0,std=0.02)
+            for m in [Wq, Wk, Wv, Wo, Wcq, Wck, Wcv, Wco]:
                 nn.init.zeros_(m.bias)
 
-            W_q.append(layer_mat_W_q)
-            W_k.append(layer_mat_W_k)
-            W_v.append(layer_mat_W_v)
-            W_o.append(layer_mat_W_o)
-            W_ff1.append(layer_ff_W1)
-            W_ff2.append(layer_ff_W2)
-            W_norm_self_a.append(norm_self_a)
-            W_norm_self_b.append(norm_self_b)
-            W_norm_cross_a.append(norm_cross_a)
-            W_norm_cross_b.append(norm_cross_b)
-            W_norm_ff_a.append(norm_ff_a)
-            W_norm_ff_b.append(norm_ff_b)
-            W_cross_q.append(layer_cross_W_q)
-            W_cross_k.append(layer_cross_W_k)
-            W_cross_o.append(layer_cross_W_o)
-            W_cross_v.append(layer_cross_W_v)
+            # ── Feed Forward ───────────────────────────────────
+            Wff1 = nn.Linear(self.d_model, self.d_ff, device=device)
+            Wff2 = nn.Linear(self.d_ff, self.d_model, device=device)
 
-        return (W_q, W_k, W_v, W_o,
-                W_ff1, W_ff2,
+            nn.init.kaiming_normal_(Wff1.weight, mode='fan_in', nonlinearity='relu')
+            nn.init.kaiming_normal_(Wff2.weight, mode='fan_in', nonlinearity='relu')
+            with torch.no_grad():
+                Wff2.weight *= res_scale   # residual scale
+
+            nn.init.zeros_(Wff1.bias)
+            nn.init.zeros_(Wff2.bias)
+
+            # ── Layer Norms ────────────────────────────────────
+            W_q.append(Wq);   W_k.append(Wk);   W_v.append(Wv);   W_o.append(Wo)
+            W_cross_q.append(Wcq); W_cross_k.append(Wck)
+            W_cross_v.append(Wcv); W_cross_o.append(Wco)
+            W_ff1.append(Wff1); W_ff2.append(Wff2)
+
+            W_norm_self_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
+            W_norm_self_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
+            W_norm_cross_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
+            W_norm_cross_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
+            W_norm_ff_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
+            W_norm_ff_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
+
+        return (W_q, W_k, W_v, W_o, W_ff1, W_ff2,
                 W_norm_self_a, W_norm_self_b,
                 W_norm_cross_a, W_norm_cross_b,
                 W_norm_ff_a, W_norm_ff_b,
@@ -357,8 +353,6 @@ class Decoder(nn.Module):
         # print(self.W_voc.bias.shape)
         logits = inputs @ self.emb.weight.T
         logits = logits
-        prob = F.softmax(logits, dim=2)
-        self.prob = prob
         # print("logits max:", logits.abs().max().item())
         # print("logits std:", logits.std().item())
         # print("prob max:", prob.max().item())
@@ -373,17 +367,17 @@ class Decoder(nn.Module):
 # logits std: >10
 # prob max: >0.99
 # entropy: near zero
-        return prob
+        return logits
 
 
-    def back_pre(self, targets, prob, smoothing=0.1,max_norm=1):
+    def back_pre(self, targets, logits, smoothing=0.1,max_norm=1):
 
 
         # rescaled_targets = np.expand_dims(targets, axis=-1)
         # targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
         # # print(targets_t.shape)
         # mask = (targets_t != 0)
-        log_prob = torch.log(prob.clamp(min=1e-9))   # your current approach (less stable)
+        log_prob = F.log_softmax(self.logits, dim=-1)   # your current approach (less stable)
 
         targets_t = torch.tensor(targets, dtype=torch.long, device=device).unsqueeze(-1)
         mask = (targets_t != 0)
@@ -394,7 +388,7 @@ class Decoder(nn.Module):
         loss_per_token = (1 - smoothing) * nll_loss + smoothing * smooth_loss
         loss = (loss_per_token * mask).sum() / mask.sum()
         # print(loss)
-        delta_z = self.gradient_softmax_cross_entropy(targets, prob, smoothing)
+        delta_z = self.gradient_softmax_cross_entropy(targets, logits, smoothing)
 
         # apply mask and normalise — same normalisation as loss
         delta_z = delta_z * mask / mask.sum()
@@ -696,10 +690,10 @@ class Decoder(nn.Module):
         )
 
         return del_x, del_alpha, del_beta
-    def gradient_softmax_cross_entropy(self, targets, prob, smoothing=0.1):
+    def gradient_softmax_cross_entropy(self, targets, logits, smoothing=0.1):
         targets = torch.tensor(targets, device=device)
-        B, T, V = prob.shape
-
+        B, T, V = logits.shape
+        prob = F.softmax(logits, dim=-1)
         delta_z = prob.clone()  # ∂(-mean log p)/∂z_j = p_j - 1/V, so starting with p is right
 
         # (1-ε) term: subtract 1 at correct token
@@ -715,10 +709,7 @@ class Decoder(nn.Module):
         # this is the gradient of the uniform distribution penalty term
         # mathematically: d/dz [ -eps * mean(log p) ] = eps/V * (p - 1/p... )
         # simplified: just subtract eps/V from every position since d(-log p_i)/dz_j = p_j - 1_{i==j}
-        # summed uniformly: p_j - 1/V  →  already captured by subtracting 1/V
-        delta_z -= smoothing / V
-
-        return delta_z                                        # (B, T, V)
+        # summed uniformly: p_j - 1/V  →  already captured by subtracting 1/V                                       # (B, T, V)
 
     def gradient_W_voc(self, delta_z):
     #    return torch.einsum('bti,btj->ij', self.H, delta_z)
