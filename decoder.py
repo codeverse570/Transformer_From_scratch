@@ -1074,7 +1074,7 @@ def predict(y,target, encoder, decoder):
 
         i += 1
         
-def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_val_target, batch_size=64):
+def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_val_target,enc_k,enc_q,dec_k,dec_q, batch_size=64):
     """
     Calculate validation loss without updating any weights.
     
@@ -1100,8 +1100,8 @@ def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_
             tgt_batch = x_val_target[i : i + batch_size]
 
             # ---------- forward passes ----------
-            E,E_pad_mask    = encoder.fit_pre(enc_batch)
-            logits = decoder.fit_pre(dec_batch, E,E_pad_mask)
+            E,E_pad_mask    = encoder.fit_pre(enc_batch,enc_k[i : i + batch_size],enc_q[i : i + batch_size])
+            logits = decoder.fit_pre(dec_batch, E,E_pad_mask,dec_k[i : i + batch_size],dec_q[i : i + batch_size])
 
             # ---------- loss (mirrors your back_pre logic) ----------
             rescaled_targets = np.expand_dims(tgt_batch, axis=-1)

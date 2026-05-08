@@ -119,6 +119,10 @@ if __name__ == "__main__":
     x_train_encoder_mask_k= create_pad_mask_k(x_train_encoder)
     x_train_decoder_mask_q= create_pad_mask_q(x_train_decoder)
     x_train_decoder_mask_k= create_pad_mask_k(x_train_decoder)
+    x_val_encoder_mask_q= create_pad_mask_q(x_validation_encoder)
+    x_val_encoder_mask_k= create_pad_mask_k(x_validation_encoder)
+    x_val_decoder_mask_q= create_pad_mask_q(x_validation_decoder)
+    x_val_decoder_mask_k= create_pad_mask_k(x_validation_decoder)
     while epoch!=61:
          total_loss=0
          iteration=1
@@ -144,7 +148,8 @@ if __name__ == "__main__":
          print(f"loss:- {total_loss/total_iteration} | epoch:- {epoch}")
          epoch+=1
        
-         print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
+         print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target,
+                                         x_val_encoder_mask_k,x_train_encoder_mask_q,x_val_decoder_mask_k,x_train_decoder_mask_q))
          for i in range(len(samples)):
           sample=np.array([tokenizer.encode(samples[i]).ids+[0]*(128-len(tokenizer.encode(samples[i])))])
           print(predict(sample,x_train_encoder[100:101],model.encoder,model.decoder))
