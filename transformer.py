@@ -129,11 +129,11 @@ if __name__ == "__main__":
                 #  print(loss)
                  total_loss+=loss
                  iteration+=1
-                 print(iteration)
-                 if(iteration==200):
-                    end_time= time.perf_counter()
-                    total_time= end_time-start_time
-                    print(f"total time:- {total_time:.1f}")
+                #  print(iteration)
+                #  if(iteration==200):
+                #     end_time= time.perf_counter()
+                #     total_time= end_time-start_time
+                #     print(f"total time:- {total_time:.1f}")
             
          end_time= time.perf_counter()
          total_time= end_time-start_time
