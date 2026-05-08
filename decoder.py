@@ -103,6 +103,7 @@ class Decoder(nn.Module):
         # nn.init.xavier_normal_(self.pos.weight)
         self.epsilon = 0.001
         self.causal_mask = torch.triu(torch.full((self.sent_len, self.sent_len), float('-inf'), device=device), diagonal=1)
+        self._del_E = torch.zeros(batch_size, sent_len, d_model, device=device)
 
     # ─────────────────────────────────────────────
     # Initialisation helpers
@@ -151,12 +152,22 @@ class Decoder(nn.Module):
                 W_cross_q_ada, W_cross_k_ada, W_cross_v_ada, W_cross_o_ada)
     
     def intialize_weights(self):
-        W_q, W_k, W_v, W_o = [], [], [], []
-        W_cross_q, W_cross_k, W_cross_v, W_cross_o = [], [], [], []
-        W_ff1, W_ff2 = [], []
-        W_norm_self_a, W_norm_self_b = [], []
-        W_norm_cross_a, W_norm_cross_b = [], []
-        W_norm_ff_a, W_norm_ff_b = [], []
+        W_q = nn.ModuleList()
+        W_k = nn.ModuleList()
+        W_v = nn.ModuleList()
+        W_o = nn.ModuleList()
+        W_cross_q = nn.ModuleList()
+        W_cross_k = nn.ModuleList()
+        W_cross_v = nn.ModuleList()
+        W_cross_o = nn.ModuleList()
+        W_ff1 = nn.ModuleList()
+        W_ff2 = nn.ModuleList()
+        W_norm_self_a  = nn.ParameterList()
+        W_norm_self_b  = nn.ParameterList()
+        W_norm_cross_a = nn.ParameterList()
+        W_norm_cross_b = nn.ParameterList()
+        W_norm_ff_a    = nn.ParameterList()
+        W_norm_ff_b    = nn.ParameterList()
 
         std_qk      = 1.0 / math.sqrt(self.d_model)
         std_general = 0.02
@@ -181,7 +192,6 @@ class Decoder(nn.Module):
             nn.init.normal_(Wv.weight,  mean=0.0, std=std_general)
             nn.init.normal_(Wcv.weight, mean=0.0, std=std_general)
 
-            # residual projections scaled down
             nn.init.normal_(Wo.weight,  mean=0.0, std=std_general * res_scale)
             nn.init.normal_(Wco.weight, mean=0.0, std=std_general * res_scale)
 
@@ -195,17 +205,19 @@ class Decoder(nn.Module):
             nn.init.kaiming_normal_(Wff1.weight, mode='fan_in', nonlinearity='relu')
             nn.init.kaiming_normal_(Wff2.weight, mode='fan_in', nonlinearity='relu')
             with torch.no_grad():
-                Wff2.weight *= res_scale   # residual scale
+                Wff2.weight *= res_scale
 
             nn.init.zeros_(Wff1.bias)
             nn.init.zeros_(Wff2.bias)
 
-            # ── Layer Norms ────────────────────────────────────
-            W_q.append(Wq);   W_k.append(Wk);   W_v.append(Wv);   W_o.append(Wo)
+            # ── Append to ModuleLists ──────────────────────────
+            W_q.append(Wq);       W_k.append(Wk)
+            W_v.append(Wv);       W_o.append(Wo)
             W_cross_q.append(Wcq); W_cross_k.append(Wck)
             W_cross_v.append(Wcv); W_cross_o.append(Wco)
-            W_ff1.append(Wff1); W_ff2.append(Wff2)
+            W_ff1.append(Wff1);   W_ff2.append(Wff2)
 
+            # ── Layer Norms ────────────────────────────────────
             W_norm_self_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
             W_norm_self_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
             W_norm_cross_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
@@ -223,7 +235,7 @@ class Decoder(nn.Module):
     # Forward pass
     # ─────────────────────────────────────────────
  
-    def fit_pre(self, X, E,E_pad_mask):
+    def fit_pre(self, X, E,E_pad_mask,dec_mask_k,dec_mask_q):
      with torch.no_grad():
         
         self.clear_memory()
@@ -252,8 +264,11 @@ class Decoder(nn.Module):
         self.self_att_raw_a = []
     
         # print(self.emb.weight.shape)
-        self.pad_mask_q= self.create_pad_mask_q(X)
-        self.pad_mask_k = self.create_pad_mask_k(X)
+        self.pad_mask_q= dec_mask_q
+        self.pad_mask_k = dec_mask_k
+        self.pad_mask_combined = (self.pad_mask_k | self.pad_mask_q)
+
+        self.pad_mask_cross= (E_pad_mask|self.pad_mask_q)
         embeddings = self.emb.weight[X]
         self.D = X
         inputs = embeddings+ self.pos.weight[:len(X[0])]
@@ -379,7 +394,7 @@ class Decoder(nn.Module):
         # mask = (targets_t != 0)
         log_prob = F.log_softmax(logits, dim=-1)   # your current approach (less stable)
 
-        targets_t = torch.tensor(targets, dtype=torch.long, device=device).unsqueeze(-1)
+        targets_t = targets.unsqueeze(-1)
         mask = (targets_t != 0)
 
         nll_loss    = -log_prob.gather(dim=-1, index=targets_t)       # (B, T, 1)
@@ -417,7 +432,8 @@ class Decoder(nn.Module):
         prev_delta = delta_H
         # print(prev_delta.abs().mean())
 
-        del_E = torch.zeros((self.batch_size, self.sent_len, self.d_model),device=device) 
+        del_E = self._del_E
+        del_E.zero_()
         layer_grad_store = []
         for layer in range(self.layers - 1, -1, -1):
             # print(f"layer {layer}")
@@ -609,7 +625,7 @@ class Decoder(nn.Module):
         # print(prev_delta)
         del_E= self.dropout['enc_out'].train(self.is_training).backward(del_E)
         prev_delta  = self.dropout['emb'].backward(prev_delta)
-        flat_tokens = torch.tensor(self.D, device=device).view(-1)
+        flat_tokens = self.D.view(-1)
         flat_delta  = prev_delta.view(-1, self.d_model)
         emb_grad    = torch.zeros(self.voc_size, self.d_model, device=device)
         emb_grad.index_add_(0, flat_tokens, flat_delta)
@@ -691,7 +707,6 @@ class Decoder(nn.Module):
 
         return del_x, del_alpha, del_beta
     def gradient_softmax_cross_entropy(self, targets, logits, smoothing=0.1):
-        targets = torch.tensor(targets, device=device)
         B, T, V = logits.shape
         prob = F.softmax(logits, dim=-1)
         delta_z = prob.clone()  # ∂(-mean log p)/∂z_j = p_j - 1/V, so starting with p is right
@@ -712,8 +727,8 @@ class Decoder(nn.Module):
         # summed uniformly: p_j - 1/V  →  already captured by subtracting 1/V                                       # (B, T, V)
 
     def gradient_W_voc(self, delta_z):
-    #    return torch.einsum('bti,btj->ij', self.H, delta_z)
-         return (self.H.view(-1, self.d_model).T @ delta_z.view(-1, self.voc_size))
+        #  return (self.H.view(-1, self.d_model).T @ delta_z.view(-1, self.voc_size))
+         return self._weight_grad(self.H,delta_z)
 
     def grad_layer_norm(self, delta, alpha, beta, x, f_x, r_):
      combined = (x + f_x)
@@ -738,7 +753,7 @@ class Decoder(nn.Module):
         # ff_w2 gradient: sum over batch of (layer_1_output[B].T @ delta[B])
         # Old: for B in range(self.batch_size): delta_ff_w2 += layer_1_output[B].T @ delta[B]
         # delta_ff_w2 = torch.einsum('bti,btj->ij', layer_1_output, delta).T
-        delta_ff_w2 = (layer_1_output.view(-1, self.d_ff).T @ delta.view(-1, self.d_model)).T
+        delta_ff_w2 = self._weight_grad(layer_1_output,delta).T
         delta_ff_b2 = delta.sum(dim=(0, 1))
         
         # Backprop through W_ff2
@@ -753,8 +768,8 @@ class Decoder(nn.Module):
         # ff_w1 gradient: sum over batch of (x[B].T @ delta_a[B])
         # Old: for B in range(self.batch_size): delta_ff_w1 += x[B].T @ delta_a[B]
         # delta_ff_w1 = torch.einsum('bti,btj->ij', x, delta_a).T
-        delta_ff_w1= (x.view(-1, self.d_model).T @ delta_a.view(-1, self.d_ff)).T
-        
+        # delta_ff_w1= (x.view(-1, self.d_model).T @ delta_a.view(-1, self.d_ff)).T
+        delta_ff_w1=self._weight_grad(x,delta_a).T
         delta_x = delta_a @ ff_w_1.T
         
         return delta_ff_w1, delta_ff_b1, delta_ff_w2, delta_ff_b2, delta_x
@@ -763,7 +778,8 @@ class Decoder(nn.Module):
         B, T, _ = delta.shape
         delta_o = delta @ W_o.T
         # delta_W_o = torch.einsum('bti,btj->ij', O, delta)
-        delta_W_o=(O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))
+        # delta_W_o=(O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))
+        delta_W_o =self._weight_grad(O,delta)
         delta_W_o_b= delta.sum(dim=(0,1))
         heads_delta_o = delta_o.view(B, T, self.h_count, self.d_k).transpose(1, 2)
         # print(heads_delta_o.shape,V.shape)
@@ -780,12 +796,12 @@ class Decoder(nn.Module):
         delta_E_K = heads_delta_K @ W_k.T
         delta_E_V = heads_delta_V @ W_v.T
         delta_X_Q = heads_delta_Q @ W_q.T
-        # delta_W_q= torch.einsum('bti,btj->ij', X, heads_delta_Q)
-        # delta_W_k = torch.einsum('bti,btj->ij', E, heads_delta_K)
-        # delta_W_v = torch.einsum('bti,btj->ij', E, heads_delta_V)
-        delta_W_q=(X.view(-1, self.d_model).T @ heads_delta_Q.view(-1, self.d_model))
-        delta_W_k=(E.view(-1, self.d_model).T @ heads_delta_K.view(-1, self.d_model))
-        delta_W_v=(E.view(-1, self.d_model).T @ heads_delta_V.view(-1, self.d_model))
+        # delta_W_q=(X.view(-1, self.d_model).T @ heads_delta_Q.view(-1, self.d_model))
+        # delta_W_k=(E.view(-1, self.d_model).T @ heads_delta_K.view(-1, self.d_model))
+        # delta_W_v=(E.view(-1, self.d_model).T @ heads_delta_V.view(-1, self.d_model))
+        delta_W_q=self._weight_grad(X,heads_delta_Q)
+        delta_W_k=self._weight_grad(E,heads_delta_K)
+        delta_W_v= self._weight_grad(E,heads_delta_V)     
         delta_W_q_b=  heads_delta_Q.sum(dim=(0,1))
         delta_W_k_b = heads_delta_K.sum(dim=(0,1))
         delta_W_v_b=  heads_delta_V.sum(dim=(0,1))
@@ -795,7 +811,8 @@ class Decoder(nn.Module):
         B, T, _ = delta.shape
         delta_o = delta @ W_o.T
         # delta_W_o = torch.einsum('bti,btj->ij', O, delta)
-        delta_W_o=(O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))
+        # delta_W_o=(O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))
+        delta_W_o = self._weight_grad(O,delta)
         delta_W_o_b= delta.sum(dim=(0,1))
         heads_delta_o = delta_o.view(B, T, self.h_count, self.d_k).transpose(1, 2)
         # print(heads_delta_o.shape,V.shape)
@@ -815,9 +832,12 @@ class Decoder(nn.Module):
         # delta_W_q= torch.einsum('bti,btj->ij', X, heads_delta_Q)
         # delta_W_k = torch.einsum('bti,btj->ij', X, heads_delta_K)
         # delta_W_v = torch.einsum('bti,btj->ij', X, heads_delta_V)
-        delta_W_q=(X.view(-1, self.d_model).T @ heads_delta_Q.view(-1, self.d_model))
-        delta_W_k=(X.view(-1, self.d_model).T @ heads_delta_K.view(-1, self.d_model))
-        delta_W_v=(X.view(-1, self.d_model).T @ heads_delta_V.view(-1, self.d_model))
+        # delta_W_q=(X.view(-1, self.d_model).T @ heads_delta_Q.view(-1, self.d_model))
+        # delta_W_k=(X.view(-1, self.d_model).T @ heads_delta_K.view(-1, self.d_model))
+        # delta_W_v=(X.view(-1, self.d_model).T @ heads_delta_V.view(-1, self.d_model))
+        delta_W_q=self._weight_grad(X,heads_delta_Q)
+        delta_W_k=self._weight_grad(X,heads_delta_K)
+        delta_W_v= self._weight_grad(X,heads_delta_V)  
         delta_W_q_b=  heads_delta_Q.sum(dim=(0,1))
         delta_W_k_b = heads_delta_K.sum(dim=(0,1))
         delta_W_v_b=  heads_delta_V.sum(dim=(0,1))
@@ -834,7 +854,7 @@ class Decoder(nn.Module):
         V = (x @ self.W_v[layer].weight+self.W_v[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         temp=1
         S = Q @ K.transpose(-2, -1) /(math.sqrt(self.d_k)*temp)  
-        pad_mask = torch.tensor(self.pad_mask_k|self.pad_mask_q, dtype=torch.bool, device=device)    # (B, H, T, T)
+        pad_mask = self.pad_mask_combined    # (B, H, T, T)
         S = S + self.causal_mask[:T, :T]
         S= S.masked_fill(pad_mask,negative_inf)
     
@@ -862,7 +882,7 @@ class Decoder(nn.Module):
         temp=1
         S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
         # S = S - S.max(dim=-1, keepdim=True)[0]
-        pad_mask = torch.tensor(E_pad_mask|self.pad_mask_q, dtype=torch.bool, device=device) 
+        pad_mask = self.pad_mask_cross 
         S= S.masked_fill(pad_mask,negative_inf)
         A = F.softmax(S, dim=-1)  
         A = torch.nan_to_num(A, nan=0.0)
@@ -926,15 +946,16 @@ class Decoder(nn.Module):
         clip_coef = min(1.0, max_norm / (total_norm + 1e-6))
         # print(f"[Encoder ClipGrad] global_norm={total_norm:.4f}, coef={clip_coef:.4f}")
         return clip_coef
+    def _weight_grad(self, x, delta):
+    # x: (B,T,Di), delta: (B,T,Do) → (Di, Do)
+       return x.flatten(0,1).T @ delta.flatten(0,1)
     def create_pad_mask_q(self, X):
-            if not isinstance(X, torch.Tensor):
-                X = torch.tensor(X, device=device)
+
             pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
             # pad_k = (X == 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, T)
             return pad_q  
     def create_pad_mask_k(self, X):
-            if not isinstance(X, torch.Tensor):
-                X = torch.tensor(X, device=device)
+
             # pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
             pad_k = (X == 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, T)
             return  pad_k  # (B, 1, T, T)
@@ -1028,7 +1049,7 @@ def log_grad_flow(decoder):
         print("Norm ff alpha:", decoder.W_norm_ff_a[i].abs().mean().item())
 def predict(y,target, encoder, decoder):
     
-    y = torch.tensor(y).to(device)
+    
 
     E,E_pad_mask = encoder.fit_pre(y)
 
@@ -1084,7 +1105,7 @@ def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_
 
             # ---------- loss (mirrors your back_pre logic) ----------
             rescaled_targets = np.expand_dims(tgt_batch, axis=-1)
-            targets_t = torch.tensor(rescaled_targets, dtype=torch.long, device=device)
+            targets_t =rescaled_targets
             # print(targets_t.shape)
             log_prob = F.log_softmax(logits, dim=-1)   # your current approach (less stable)
 

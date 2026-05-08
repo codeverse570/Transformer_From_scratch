@@ -27,7 +27,7 @@ class Transformer :
         #  nn.init.xavier_normal_(self.pos.weight)
          nn.init.normal_(self.emb.weight, mean=0, std=1.0 / math.sqrt(self.d_model))
          nn.init.normal_(self.pos.weight, mean=0, std= 0.01)
-    def fit(self,encoder_inputs,decoder_inputs,targets):
+    def fit(self,encoder_inputs,decoder_inputs,targets,enc_k,enc_q,dec_k,dec_q):
          
          self.decoder.emb=self.emb
          self.decoder.pos=self.pos
@@ -40,9 +40,9 @@ class Transformer :
          self.decoder.train()
          self.encoder.train()
 
-         E,E_pad_mask = self.encoder.fit_pre(encoder_inputs)
+         E,E_pad_mask = self.encoder.fit_pre(encoder_inputs,enc_k,enc_q)
          
-         prob = self.decoder.fit_pre(decoder_inputs, E,E_pad_mask)
+         prob = self.decoder.fit_pre(decoder_inputs, E,E_pad_mask,dec_k,dec_q)
          
          self.schedular.advance()
             
@@ -67,6 +67,16 @@ class Transformer :
         clip_coef = min(1.0, max_norm / (total_norm + 1e-6))
         # print(f"[Encoder ClipGrad] global_norm={total_norm:.4f}, coef={clip_coef:.4f}")
         return clip_coef
+def create_pad_mask_q( X):
+
+            pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
+            # pad_k = (X == 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, T)
+            return pad_q  
+def create_pad_mask_k( X):
+
+            # pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
+            pad_k = (X == 0).unsqueeze(1).unsqueeze(2)  # (B, 1, 1, T)
+            return  pad_k  # (B, 1, T, T)
 if __name__ == "__main__":
     x_train_decoder = []
     x_train_encoder = []
@@ -102,16 +112,28 @@ if __name__ == "__main__":
         "The quick brown fox jumps over the lazy dog.",
          ]
     tokenizer=Tokenizer.from_file("bpe_translation.json")
+    x_train_encoder= torch.as_tensor(x_train_encoder, device=device)
+    x_train_decoder= torch.as_tensor(x_train_decoder,device=device)
+    x_train_target= torch.as_tensor(x_train_target,device=device).long()
+    x_train_encoder_mask_q= create_pad_mask_q(x_train_encoder)
+    x_train_encoder_mask_k= create_pad_mask_k(x_train_encoder)
+    x_train_decoder_mask_q= create_pad_mask_q(x_train_decoder)
+    x_train_decoder_mask_k= create_pad_mask_k(x_train_decoder)
     while epoch!=61:
          total_loss=0
          iteration=1
          for i in range(0,len(x_train_encoder)-64,64):
              with torch.no_grad():
-                 loss= model.fit(x_train_encoder[i:i+64],x_train_decoder[i:i+64],x_train_target[i:i+64])
+                 loss= model.fit(x_train_encoder[i:i+64],x_train_decoder[i:i+64],x_train_target[i:i+64],x_train_encoder_mask_k[i:i+64]
+                                 ,x_train_encoder_mask_q[i:i+64],x_train_decoder_mask_k[i:i+64],x_train_decoder_mask_q[i:i+64])
                 #  print(loss)
                  total_loss+=loss
                  iteration+=1
-         
+                 print(iteration)
+                 if(iteration==200):
+                    end_time= time.perf_counter()
+                    total_time= end_time-start_time
+                    print(f"total time:- {total_time:.1f}")
             
          end_time= time.perf_counter()
          total_time= end_time-start_time

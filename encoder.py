@@ -152,11 +152,11 @@ class Encoder():
        pass
     
 
-    def fit_pre(self, x):
+    def fit_pre(self, x,enc_mask_k,enc_mask_q):
      
         self.clear_memory()
-        self.pad_mask_k=self.create_pad_mask_k(x)
-        self.pad_mask_q= self.create_pad_mask_q(x)
+        self.pad_mask_k=enc_mask_k
+        self.pad_mask_q=enc_mask_q
         x_encodings = self.emb.weight[x]
         x_encodings = x_encodings + (self.pos.weight)
         # x_encodings = x_encodings*torch.sqrt(self.d_model) + self.sin_pos* 0.02
@@ -387,7 +387,7 @@ class Encoder():
         # ff_w2 gradient: sum over batch of (layer_1_output[B].T @ delta[B])
         # Old: for B in range(self.batch_size): delta_ff_w2 += layer_1_output[B].T @ delta[B]
         # delta_ff_w2 = torch.einsum('bti,btj->ij', layer_1_output, delta).T
-        delta_ff_w2 = (layer_1_output.view(-1, self.d_ff).T @ delta.view(-1, self.d_model)).T
+        delta_ff_w2 = self._weight_grad(layer_1_output,delta).T
         
         delta_ff_b2 = delta.sum(dim=(0, 1))
         
@@ -402,7 +402,7 @@ class Encoder():
         # ff_w1 gradient: sum over batch of (x[B].T @ delta_a[B])
         # Old: for B in range(self.batch_size): delta_ff_w1 += x[B].T @ delta_a[B]
         # delta_ff_w1 = torch.einsum('bti,btj->ij', x, delta_a).T
-        delta_ff_w1 = (x.view(-1, self.d_model).T @ delta_a.view(-1, self.d_ff)).T
+        delta_ff_w1=self._weight_grad(x,delta_a).T
         delta_x = delta_a @ ff_w_1.T
         
         return delta_ff_w1, delta_ff_b1, delta_ff_w2, delta_ff_b2, delta_x
@@ -411,7 +411,7 @@ class Encoder():
         B, T, _ = delta.shape
         delta_o = delta @ W_o.T
         # delta_W_o = torch.einsum('bti,btj->ij', O, delta)
-        delta_W_o = (O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))
+        delta_W_o = self._weight_grad(O,delta)
         delta_W_o_b= delta.sum(dim=(0,1))
         heads_delta_o = delta_o.view(B, T, self.h_count, self.d_k).transpose(1, 2)
         heads_delta_A= heads_delta_o@V.transpose(-2,-1)
@@ -430,9 +430,9 @@ class Encoder():
         # delta_W_q= torch.einsum('bti,btj->ij', X, heads_delta_Q)
         # delta_W_k = torch.einsum('bti,btj->ij', X, heads_delta_K)
         # delta_W_v = torch.einsum('bti,btj->ij', X, heads_delta_V)
-        delta_W_q= (X.view(-1, self.d_model).T @ heads_delta_Q.view(-1, self.d_model))
-        delta_W_k= (X.view(-1, self.d_model).T @ heads_delta_K.view(-1, self.d_model))
-        delta_W_v= (X.view(-1, self.d_model).T @ heads_delta_V.view(-1, self.d_model))
+        delta_W_q=self._weight_grad(X,heads_delta_Q)
+        delta_W_k=self._weight_grad(X,heads_delta_K)
+        delta_W_v= self._weight_grad(X,heads_delta_V)  
         delta_W_q_b=  heads_delta_Q.sum(dim=(0,1))
         delta_W_k_b = heads_delta_K.sum(dim=(0,1))
         delta_W_v_b=  heads_delta_V.sum(dim=(0,1))
@@ -455,7 +455,7 @@ class Encoder():
        S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
     #    S = S - S.max(dim=-1, keepdim=True)[0]
        
-       mask = torch.tensor(self.pad_mask_k|self.pad_mask_q, dtype=torch.bool, device=device)
+       mask = self.pad_mask_k|self.pad_mask_q
        
        S= S.masked_fill(mask,negative_inf)
        A = F.softmax(S, dim=-1) 
@@ -513,6 +513,9 @@ class Encoder():
           X = torch.tensor(X, device=device)
         pad_q = (X == 0).unsqueeze(1).unsqueeze(3)
         return pad_q
+    def _weight_grad(self, x, delta):
+    # x: (B,T,Di), delta: (B,T,Do) → (Di, Do)
+       return x.flatten(0,1).T @ delta.flatten(0,1)
     def get_sinusoidal_positional_encoding(self,seq_len, d_model):
         pos = torch.arange(seq_len).unsqueeze(1)
         i = torch.arange(d_model).unsqueeze(0)
