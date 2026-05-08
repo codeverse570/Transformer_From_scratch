@@ -155,7 +155,7 @@ if __name__ == "__main__":
                                          x_val_encoder_mask_k,x_train_encoder_mask_q,x_val_decoder_mask_k,x_train_decoder_mask_q))
          for i in range(len(samples)):
           sample=np.array([tokenizer.encode(samples[i]).ids+[0]*(128-len(tokenizer.encode(samples[i])))])
-          print(predict(sample,x_train_encoder[100:101],model.encoder,model.decoder))
+        #   print(predict(sample,x_train_encoder[100:101],model.encoder,model.decoder))
     sample=np.array([tokenizer.encode(samples[0]).ids+[0]*(128-len(tokenizer.encode(samples[1])))])
     print(predict(test_batch,x_train_encoder[100:101],model.encoder,model.decoder))
     print(calculate_validation_loss(model.encoder,model.decoder,x_validation_encoder,x_validation_decoder,x_validation_target))
