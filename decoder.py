@@ -1104,8 +1104,7 @@ def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_
             logits = decoder.fit_pre(dec_batch, E,E_pad_mask,dec_k[i : i + batch_size],dec_q[i : i + batch_size])
 
             # ---------- loss (mirrors your back_pre logic) ----------
-            rescaled_targets = np.expand_dims(tgt_batch, axis=-1)
-            targets_t =rescaled_targets
+            targets_t = tgt_batch.unsqueeze(-1)
             # print(targets_t.shape)
             log_prob = F.log_softmax(logits, dim=-1)   # your current approach (less stable)
 
