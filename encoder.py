@@ -9,12 +9,20 @@ import torch.nn.functional as F
 import numpy as np
 from dropout import Dropout
 from adam import AdamCustom
+import torch._dynamo
 # from utils.utils import create_training_files,create_tokens_from_file,get_tokens_from_file,make_samples,abs_mean
 # from AdamCustom import AdamCustom
 from pathlib import Path
 negative_inf = float('-inf')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(42)
+torch.set_default_dtype(torch.float32)
+# def _layer_norm(x: torch.Tensor, alpha: torch.Tensor, 
+#                 beta: torch.Tensor, epsilon: float) -> torch.Tensor:
+#     mean = x.mean(dim=-1, keepdim=True)
+#     var = x.var(dim=-1, keepdim=True, unbiased=False)
+#     return ((x - mean) / torch.sqrt(var + epsilon)) * alpha + beta
+# _compiled_layer_norm = torch.compile(_layer_norm,  backend="cudagraphs", fullgraph=True)
 
 class Encoder():
     def __init__(self,d_model,h_count,d_ff,voc_size,sent_len,layers,batch_size,schedular):
@@ -61,6 +69,9 @@ class Encoder():
       self.att_raw_a=[]       
       self.grads=[]
       self.epsilon = 0.001
+      self.grad_att = torch.compile(self.grad_att, backend='inductor')
+      self.grad_ff  = torch.compile(self.grad_ff,   backend='inductor')
+      self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre,backend='inductor', fullgraph=False)
     #   nn.init.xavier_normal_(self.emb.weight)
     #   nn.init.xavier_normal_(self.pos.weight)
 
@@ -152,11 +163,10 @@ class Encoder():
        pass
     
 
-    def fit_pre(self, x,enc_mask_k,enc_mask_q):
+    def fit_pre(self, x,enc_mask_comb):
      
         self.clear_memory()
-        self.pad_mask_k=enc_mask_k
-        self.pad_mask_q=enc_mask_q
+        self.enc_mask_comb=enc_mask_comb
         x_encodings = self.emb.weight[x]
         x_encodings = x_encodings + (self.pos.weight)
         # x_encodings = x_encodings*torch.sqrt(self.d_model) + self.sin_pos* 0.02
@@ -177,7 +187,8 @@ class Encoder():
             norm_inputs = self.layer_norm(
                 inputs,
                 self.W_norm_att_a[layer],
-                self.W_norm_att_b[layer]
+                self.W_norm_att_b[layer],
+                self.epsilon
             )
 
             att_output, att_o, att_Q, att_K, att_V, att_S, att_A,raw_A= self.self_attention(norm_inputs, layer)
@@ -190,12 +201,13 @@ class Encoder():
             norm_att = self.layer_norm(
                 att_residual,
                 self.W_norm_ff_a[layer],
-                self.W_norm_ff_b[layer]
+                self.W_norm_ff_b[layer],
+                self.epsilon
             )
 
-            ff_layer_1 = F.relu(norm_att @ self.W_ff1[layer].weight.T +self.W_ff1[layer].bias )
+            ff_layer_1 = F.relu(self.W_ff1[layer](norm_att))
             ff_layer_1= self.dropout['ff_layer_1'].train(self.is_training).forward(ff_layer_1)
-            ff_output = ff_layer_1 @ self.W_ff2[layer].weight.T + self.W_ff2[layer].bias
+            ff_output =  self.W_ff2[layer](ff_layer_1)
 
             outputs = att_residual + self.dropout['ff_out'].train(self.is_training).forward(ff_output)
 
@@ -229,7 +241,7 @@ class Encoder():
             # print("percentage:", count / total)
             inputs = outputs
 
-        return inputs,self.pad_mask_k
+        return inputs
 
 
     def back_pre(self,delta,E,tags,max_norm=1):
@@ -242,7 +254,7 @@ class Encoder():
              del_ff_r,del_ff_alpha,del_ff_beta= self.grad_layer_norm_pre(ff_x_grad,self.W_norm_ff_a[layer],self.W_norm_ff_b[layer],self.residual_ff[layer])
              att_delta_in= del_ff_r+new_delta  
              att_delta_X_k,att_delta_X_v,att_delta_X_q,att_delta_W_q,att_delta_W_k,att_delta_W_v,att_delta_W_o,\
-             att_delta_W_q_b,att_delta_W_k_b,att_delta_W_v_b,att_delta_W_o_b=self.grad_att(self.dropout['self_att_out'].backward(att_delta_in),self.W_o[layer].weight,self.att_o[layer],self.att_a[layer],self.att_raw_a[layer],self.att_v[layer],self.att_q[layer],self.att_k[layer],self.att_inputs[layer],self.W_q[layer].weight,self.W_k[layer].weight,self.W_v[layer].weight)
+             att_delta_W_q_b,att_delta_W_k_b,att_delta_W_v_b,att_delta_W_o_b=self.grad_att(self.dropout['self_att_out'].backward(att_delta_in),self.W_o[layer].weight.T,self.att_o[layer],self.att_a[layer],self.att_raw_a[layer],self.att_v[layer],self.att_q[layer],self.att_k[layer],self.att_inputs[layer],self.W_q[layer].weight,self.W_k[layer].weight,self.W_v[layer].weight)
              att_delta_out= (att_delta_X_v+att_delta_X_k+att_delta_X_q)
              del_att_r,del_att_alpha,del_att_beta= self.grad_layer_norm_pre(att_delta_out,self.W_norm_att_a[layer],self.W_norm_att_b[layer],self.residual_att[layer])
              new_delta =del_att_r+att_delta_in
@@ -421,9 +433,9 @@ class Encoder():
         heads_delta_S = raw_A* (heads_delta_A - dot_delA_A)
         heads_delta_Q= (heads_delta_S @ K) / np.sqrt(self.d_k)
         heads_delta_K= (heads_delta_S.transpose(-2, -1) @ Q) / np.sqrt(self.d_k)
-        heads_delta_V= heads_delta_V.transpose(1, 2).contiguous().view(B, T, -1)   
-        heads_delta_Q= heads_delta_Q.transpose(1, 2).contiguous().view(B, T, -1)   
-        heads_delta_K= heads_delta_K.transpose(1,2).contiguous().view(B, T, -1)  
+        heads_delta_V= heads_delta_V.transpose(1, 2).reshape(B, T, -1)
+        heads_delta_Q= heads_delta_Q.transpose(1, 2).reshape(B, T, -1)  
+        heads_delta_K= heads_delta_K.transpose(1,2).reshape(B, T, -1) 
         delta_X_K = heads_delta_K @ W_k.T
         delta_X_V = heads_delta_V @ W_v.T
         delta_X_Q = heads_delta_Q @ W_q.T
@@ -440,22 +452,22 @@ class Encoder():
 
     def self_attention(self,X,layer):
        B, T, _ = X.shape
-       Wq= self.W_q[layer].weight
-       Wk= self.W_k[layer].weight
-       Wv= self.W_v[layer].weight
-       Wq_b = self.W_q[layer].bias
-       Wk_b = self.W_k[layer].bias
-       Wv_b = self.W_v[layer].bias
+       Wq= self.W_q[layer]
+       Wk= self.W_k[layer]
+       Wv= self.W_v[layer]
+    #    Wq_b = self.W_q[layer].bias
+    #    Wk_b = self.W_k[layer].bias
+    #    Wv_b = self.W_v[layer].bias
         # print(Wk.shape)
-       Q = (X @ Wq+Wq_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-       K = (X @ Wk+Wk_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-       V = (X @ Wv+Wv_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+       Q = ( Wq(X)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+       K = (Wk(X)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+       V = (Wv(X)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
        temp=1
        
        S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
     #    S = S - S.max(dim=-1, keepdim=True)[0]
        
-       mask = self.pad_mask_k|self.pad_mask_q
+       mask = self.enc_mask_comb
        
        S= S.masked_fill(mask,negative_inf)
        A = F.softmax(S, dim=-1) 
@@ -463,18 +475,18 @@ class Encoder():
        raw_A= A   
        
        A= self.dropout['self_att_a'].train(self.is_training).forward(A)                             # (B, H, T, T)
-       O = (A @ V).transpose(1, 2).contiguous().view(B, T, -1)  
+       O = (A @ V).transpose(1, 2).reshape(B, T, -1)
     #    print(self.W_o[layer].bias)
        
-       Z= O@self.W_o[layer].weight+ self.W_o[layer].bias
+       Z= self.W_o[layer](O)
        
-       return Z, O .clone(), Q .clone(), K .clone(), V .clone(), S, A,raw_A
+       return Z, O, Q, K, V, S, A,raw_A
 
     
-    def layer_norm(self, X, alpha, beta):
+    def layer_norm(self, X, alpha, beta,epsilon):
         mean = X.mean(dim=-1, keepdim=True)          # ← fix dim
         var  = X.var(dim=-1, keepdim=True, unbiased=False)
-        std  = torch.sqrt(var + self.epsilon)
+        std  = torch.sqrt(var + epsilon)
         return (X - mean) / std * alpha + beta
     def update_weights(self,coef):
                  for store in self.grads:
@@ -515,7 +527,7 @@ class Encoder():
         return pad_q
     def _weight_grad(self, x, delta):
     # x: (B,T,Di), delta: (B,T,Do) → (Di, Do)
-       return x.flatten(0,1).T @ delta.flatten(0,1)
+       return torch.einsum('bti,btj->ij', x, delta)
     def get_sinusoidal_positional_encoding(self,seq_len, d_model):
         pos = torch.arange(seq_len).unsqueeze(1)
         i = torch.arange(d_model).unsqueeze(0)

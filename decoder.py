@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from encoder import Encoder
+# from encoder import Encoder
 # from AdamCustom import AdamCustom
 from adam import AdamCustom
 from utils.utils import count_tensors,debug_top_tensors
@@ -22,6 +22,7 @@ tokenizer = Tokenizer.from_file("bpe_translation.json")
 from utils.utils import abs_mean
 negative_inf = float('-inf')
 torch.set_default_dtype(torch.float32)
+torch.set_float32_matmul_precision('high')
 
 
 class Decoder(nn.Module):
@@ -91,6 +92,7 @@ class Decoder(nn.Module):
         self.self_att_a = []
         self.self_att_raw_a = []
         self.residual_self=[]
+        self.L=[]
 
         # ── Per-batch state (set in fit, deleted in back) ──
         self.H = None
@@ -104,6 +106,23 @@ class Decoder(nn.Module):
         self.epsilon = 0.001
         self.causal_mask = torch.triu(torch.full((self.sent_len, self.sent_len), float('-inf'), device=device), diagonal=1)
         self._del_E = torch.zeros(batch_size, sent_len, d_model, device=device)
+        self.grad_ff        = torch.compile(self.grad_ff, backend='inductor' , fullgraph=False)
+        self.grad_cross_att = torch.compile(self.grad_cross_att,backend='inductor', fullgraph=False)
+        self.grad_multi_self_att = torch.compile(self.grad_multi_self_att, backend='inductor',fullgraph=False)
+        self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre, backend='inductor',fullgraph=False)
+        self.delta_H    = torch.zeros(batch_size, sent_len, d_model, device=device)
+        self.delta_z    = torch.zeros(batch_size, sent_len, voc_size, device=device)
+        self.emb_grad   = torch.zeros(voc_size, d_model, device=device)
+        self.W_qkv = nn.ModuleList([
+            nn.Linear(d_model, 3 * d_model, device=device) 
+            for _ in range(layers)
+        ])
+        # self.grad_cross_att = torch.compile(self.grad_cross_att, backend='aot_eager')
+        # self.masked_self_att  = torch.compile(self.masked_self_att,   backend='aot_eager')
+        # self.grad_ff= torch.compile(self.grad_ff,backend='aot_eager')
+        # self.layer_norm = torch.compile(self.layer_norm, fullgraph=True)
+        # self._compiled_ff = torch.compile(self._ff_forward, fullgraph=True)
+        
 
     # ─────────────────────────────────────────────
     # Initialisation helpers
@@ -235,7 +254,7 @@ class Decoder(nn.Module):
     # Forward pass
     # ─────────────────────────────────────────────
  
-    def fit_pre(self, X, E,E_pad_mask,dec_mask_k,dec_mask_q):
+    def fit_pre(self, X, E,dec_mask_comb,dec_mask_cross_comb):
      with torch.no_grad():
         
         self.clear_memory()
@@ -264,11 +283,10 @@ class Decoder(nn.Module):
         self.self_att_raw_a = []
     
         # print(self.emb.weight.shape)
-        self.pad_mask_q= dec_mask_q
-        self.pad_mask_k = dec_mask_k
-        self.pad_mask_combined = (self.pad_mask_k | self.pad_mask_q)
 
-        self.pad_mask_cross= (E_pad_mask|self.pad_mask_q)
+        self.pad_mask_combined = dec_mask_comb
+
+        self.pad_mask_cross= dec_mask_cross_comb
         embeddings = self.emb.weight[X]
         self.D = X
         inputs = embeddings+ self.pos.weight[:len(X[0])]
@@ -290,7 +308,7 @@ class Decoder(nn.Module):
             # =========================
             norm_inputs = self.layer_norm(
                 inputs,
-                self.W_norm_self_a[layer], self.W_norm_self_b[layer]
+                self.W_norm_self_a[layer], self.W_norm_self_b[layer],self.epsilon
             )
 
             multi_self_att, multi_self_att_o, multi_self_att_Q, multi_self_att_K, \
@@ -303,11 +321,11 @@ class Decoder(nn.Module):
             # =========================
             norm_self_out = self.layer_norm(
                 self_out,
-                self.W_norm_cross_a[layer], self.W_norm_cross_b[layer]
+                self.W_norm_cross_a[layer], self.W_norm_cross_b[layer],self.epsilon
             )
 
             cross_self_att, cross_att_o, cross_att_Q, cross_att_K, cross_att_V, \
-             cross_att_A,cross_att_raw_A= self.cross_attention(norm_self_out, E, layer,E_pad_mask)
+             cross_att_A,cross_att_raw_A= self.cross_attention(norm_self_out, E, layer)
 
             cross_out = self_out + self.dropout['cross_att_out'].train(self.is_training).forward(cross_self_att)
 
@@ -316,7 +334,7 @@ class Decoder(nn.Module):
             # =========================
             norm_cross_out = self.layer_norm(
                 cross_out,
-                self.W_norm_ff_a[layer], self.W_norm_ff_b[layer]
+                self.W_norm_ff_a[layer], self.W_norm_ff_b[layer],self.epsilon
             )
 
             ff_layer_1 = F.relu(norm_cross_out @ self.W_ff1[layer].weight.T +self.W_ff1[layer].bias)
@@ -358,6 +376,7 @@ class Decoder(nn.Module):
             self.self_att_v.append(multi_self_att_V)
             self.self_att_a.append(multi_self_att_A)
             self.self_att_raw_a.append(multi_self_att_raw_A)
+            # self.L.append(L)
             # total = self.self_att_a[layer].numel()
             # count = (self.self_att_a[layer] > 1).sum().item()
 
@@ -411,9 +430,9 @@ class Decoder(nn.Module):
         # print(delta_z.shape)
         # delta_W_voc_b= delta_z.sum(dim=(0,1))
         # delta_H = delta_z @ self.emb.weight
-    
-        delta_H = delta_z@ self.emb.weight
-        delta_H= delta_H
+        self.delta_H.zero_()
+        self.delta_H.copy_(delta_z@ self.emb.weight)
+        
         # print("decoder ",delta_H.abs().mean())A
          # check= self.W_voc.clone()
         # W_voc_grad=self.W_voc_ada.grad(delta_W_voc,self.W_voc.weight)
@@ -429,7 +448,7 @@ class Decoder(nn.Module):
             # self.W_voc.weight -= 0.0001*delta_W_voc
         
 
-        prev_delta = delta_H
+        prev_delta = self.delta_H
         # print(prev_delta.abs().mean())
 
         del_E = self._del_E
@@ -483,7 +502,7 @@ class Decoder(nn.Module):
 
             delta_E_k, delta_E_v, delta_x, delta_W_q, delta_W_k, delta_W_v, delta_W_o,delta_W_q_b, delta_W_k_b, delta_W_v_b, delta_W_o_b = self.grad_cross_att(
                 self.dropout['cross_att_out'].backward(delta_cross),
-                self.W_cross_o[layer].weight,
+                self.W_cross_o[layer].weight.T,
                 self.cross_att_o[layer],
                 self.cross_att_a[layer],
                 self.cross_att_raw_a[layer],
@@ -521,7 +540,7 @@ class Decoder(nn.Module):
             self_delta_X_k, self_delta_X_v, self_delta_X_q, \
             self_delta_W_q, self_delta_W_k, self_delta_W_v, self_delta_W_o, self_delta_W_q_b, self_delta_W_k_b, self_delta_W_v_b, self_delta_W_o_b = self.grad_multi_self_att(
                 self.dropout['self_att_out'].backward(delta_self),
-                self.W_o[layer].weight,
+                self.W_o[layer].weight.T,
                 self.self_att_o[layer],
                 self.self_att_a[layer],
                 self.self_att_raw_a[layer],
@@ -627,9 +646,10 @@ class Decoder(nn.Module):
         prev_delta  = self.dropout['emb'].backward(prev_delta)
         flat_tokens = self.D.view(-1)
         flat_delta  = prev_delta.view(-1, self.d_model)
-        emb_grad    = torch.zeros(self.voc_size, self.d_model, device=device)
-        emb_grad.index_add_(0, flat_tokens, flat_delta)
-        delta_W_voc += emb_grad
+        
+        self.emb_grad.zero_()
+        self.emb_grad.index_add_(0, flat_tokens, flat_delta)
+        delta_W_voc += self.emb_grad
         
         all_grads = [delta_W_voc]
         for store in layer_grad_store:
@@ -707,17 +727,12 @@ class Decoder(nn.Module):
 
         return del_x, del_alpha, del_beta
     def gradient_softmax_cross_entropy(self, targets, logits, smoothing=0.1):
-        B, T, V = logits.shape
-        prob = F.softmax(logits, dim=-1)
-        delta_z = prob.clone()  # ∂(-mean log p)/∂z_j = p_j - 1/V, so starting with p is right
-
-        # (1-ε) term: subtract 1 at correct token
-        delta_z[torch.arange(B)[:, None], torch.arange(T), targets] -= (1.0 - smoothing)
-
-        # ε term: gradient of -ε * mean(log p) w.r.t z_j = ε*(p_j - 1/V)
-        # p_j is already in delta_z; just subtract ε/V
-        delta_z -= smoothing / V   # the +ε*p_j part is already implicitly there via the clone
-
+        self.delta_z.zero_()
+        prob = torch.softmax(logits, dim=-1)
+        self.delta_z.copy_(prob)
+        self.delta_z[torch.arange(self.batch_size)[:, None], torch.arange(logits.shape[1]), targets] -= (1.0 - smoothing)
+        self.delta_z -= smoothing / self.voc_size
+        delta_z = self.delta_z
         return delta_z
 
         # subtract smoothing/V from every vocab position
@@ -790,9 +805,9 @@ class Decoder(nn.Module):
         heads_delta_S = raw_A * (heads_delta_A - dot_delA_A)
         heads_delta_Q= (heads_delta_S @ K) / np.sqrt(self.d_k)
         heads_delta_K= (heads_delta_S.transpose(-2, -1) @ Q) / np.sqrt(self.d_k)
-        heads_delta_V= heads_delta_V.transpose(1, 2).contiguous().view(B, T, -1)   
-        heads_delta_Q= heads_delta_Q.transpose(1, 2).contiguous().view(B, T, -1)   
-        heads_delta_K= heads_delta_K.transpose(1,2).contiguous().view(B, T, -1)  
+        heads_delta_V= heads_delta_V.transpose(1, 2).reshape(B, T, -1)   
+        heads_delta_Q= heads_delta_Q.transpose(1, 2).reshape(B, T, -1) 
+        heads_delta_K= heads_delta_K.transpose(1,2).reshape(B, T, -1)
         delta_E_K = heads_delta_K @ W_k.T
         delta_E_V = heads_delta_V @ W_v.T
         delta_X_Q = heads_delta_Q @ W_q.T
@@ -810,25 +825,31 @@ class Decoder(nn.Module):
     def grad_multi_self_att(self, delta, W_o, O, A,raw_A, V, Q, K, X, W_q, W_k, W_v):
         B, T, _ = delta.shape
         delta_o = delta @ W_o.T
+        
         # delta_W_o = torch.einsum('bti,btj->ij', O, delta)
-        # delta_W_o=(O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))
+        # delta_W_o=(O.view(-1, self.d_model).T @ delta.view(-1, self.d_model))\
+        
         delta_W_o = self._weight_grad(O,delta)
         delta_W_o_b= delta.sum(dim=(0,1))
         heads_delta_o = delta_o.view(B, T, self.h_count, self.d_k).transpose(1, 2)
+        # print(heads_delta_o)
         # print(heads_delta_o.shape,V.shape)
         heads_delta_A= heads_delta_o@V.transpose(-2,-1)
-        heads_delta_A= self.dropout['self_att_a'].backward(heads_delta_A)
+        # heads_delta_A= self.dropout['self_att_a'].backward(heads_delta_A)
         heads_delta_V= A.transpose(-2,-1)@heads_delta_o
         dot_delA_A= (heads_delta_A * raw_A).sum(dim=-1, keepdim=True)
         heads_delta_S = raw_A * (heads_delta_A - dot_delA_A)
+        
         heads_delta_Q= (heads_delta_S @ K) / np.sqrt(self.d_k)
         heads_delta_K= (heads_delta_S.transpose(-2, -1) @ Q) / np.sqrt(self.d_k)
-        heads_delta_V= heads_delta_V.transpose(1, 2).contiguous().view(B, T, -1)   
-        heads_delta_Q= heads_delta_Q.transpose(1, 2).contiguous().view(B, T, -1)   
-        heads_delta_K= heads_delta_K.transpose(1,2).contiguous().view(B, T, -1)  
+        heads_delta_V= heads_delta_V.transpose(1, 2).reshape(B, T, -1)  
+        heads_delta_Q= heads_delta_Q.transpose(1, 2).reshape(B, T, -1)  
+        heads_delta_K= heads_delta_K.transpose(1,2).reshape(B, T, -1) 
         delta_X_K = heads_delta_K @ W_k.T
         delta_X_V = heads_delta_V @ W_v.T
         delta_X_Q = heads_delta_Q @ W_q.T
+        # dq,dk,dv=flash_attention_backward(Q,K,V,O.view(B, T, self.h_count, self.d_k).transpose(1,2),heads_delta_o,L)
+
         # delta_W_q= torch.einsum('bti,btj->ij', X, heads_delta_Q)
         # delta_W_k = torch.einsum('bti,btj->ij', X, heads_delta_K)
         # delta_W_v = torch.einsum('bti,btj->ij', X, heads_delta_V)
@@ -849,36 +870,38 @@ class Decoder(nn.Module):
     # ─────────────────────────────────────────────
     def masked_self_att(self, x, layer):
         B, T, _ = x.shape
-        Q = (x @ self.W_q[layer].weight+self.W_q[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
-        K = (x @ self.W_k[layer].weight+self.W_k[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-        V = (x @ self.W_v[layer].weight+self.W_v[layer].bias).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+        Q = (self.W_q[layer](x)).view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
+        K = (self.W_k[layer](x)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+        V = (self.W_v[layer](x)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
         temp=1
         S = Q @ K.transpose(-2, -1) /(math.sqrt(self.d_k)*temp)  
         pad_mask = self.pad_mask_combined    # (B, H, T, T)
         S = S + self.causal_mask[:T, :T]
         S= S.masked_fill(pad_mask,negative_inf)
-    
+        # S=S - S.max(dim=-1, keepdim=True).values
         A = F.softmax(S, dim=-1)  
         A = torch.nan_to_num(A, nan=0.0)
         raw_A= A
-        A= self.dropout['self_att_a'].train(self.is_training).forward(A)                                  # (B, H, T, T)
-        O = (A @ V).transpose(1, 2).contiguous().view(B, T, -1)     # (B, T, d_model)
-        output = O @ self.W_o[layer].weight +self.W_o[layer].bias
+        # A= self.dropout['self_att_a'].train(self.is_training).forward(A)                                  # (B, H, T, T)
+        O = (A @ V).transpose(1, 2).reshape(B, T, -1)   # (B, T, d_model)
+        # O_flash,L=flash_attention_pytorch(Q,K,V,True,None,self.dec_k,self.dec_q)
+        # print(O[0][0]==O_flash.transpose(1, 2).reshape(B, T, -1)[0][0])
+        output = self.W_o[layer](O)
         return output, O, Q, K, V, A,raw_A
 
-    def cross_attention(self, z1, E, layer,E_pad_mask):
+    def cross_attention(self, z1, E, layer):
         B, T, _ = z1.shape
         E_B,E_T,_= E.shape
-        Wq = self.W_cross_q[layer].weight
-        Wk = self.W_cross_k[layer].weight
-        Wv = self.W_cross_v[layer].weight
-        Wq_b = self.W_cross_q[layer].bias
-        Wk_b = self.W_cross_k[layer].bias
-        Wv_b = self.W_cross_v[layer].bias
+        Wq = self.W_cross_q[layer]
+        Wk = self.W_cross_k[layer]
+        Wv = self.W_cross_v[layer]
+        # Wq_b = self.W_cross_q[layer].bias
+        # Wk_b = self.W_cross_k[layer].bias
+        # Wv_b = self.W_cross_v[layer].bias
         # print(Wk.shape)
-        Q = (z1 @ Wq+Wq_b).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-        K = (E @ Wk+Wk_b).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
-        V = (E @ Wv+Wv_b).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
+        Q = ( Wq(z1)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+        K = (Wk(E)).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
+        V = (Wv(E)).view(E_B, E_T, self.h_count, self.d_k).transpose(1, 2)
         temp=1
         S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
         # S = S - S.max(dim=-1, keepdim=True)[0]
@@ -889,15 +912,15 @@ class Decoder(nn.Module):
         
         raw_A= A   
         A= self.dropout['cross_att_a'].train(self.is_training).forward(A)                               # (B, H, T, T)
-        O = (A @ V).transpose(1, 2).contiguous().view(B, T, -1)
-        output = O @ self.W_cross_o[layer].weight+self.W_cross_o[layer].bias
+        O = (A @ V).transpose(1, 2).reshape(B, T, -1)
+        output = self.W_cross_o[layer](O)
 
         return output, O, Q, K, V,  A,raw_A
 
-    def layer_norm(self, X, alpha, beta):
+    def layer_norm(self, X, alpha, beta,epsilon):
         mean = X.mean(dim=-1, keepdim=True)
         var = X.var(dim=-1, keepdim=True, unbiased=False)
-        std = torch.sqrt(var + self.epsilon)
+        std = torch.sqrt(var + epsilon)
         return ((X - mean) / std) * alpha + beta
     def update_weights(self,coef):
          for store in self.grads:
@@ -948,7 +971,8 @@ class Decoder(nn.Module):
         return clip_coef
     def _weight_grad(self, x, delta):
     # x: (B,T,Di), delta: (B,T,Do) → (Di, Do)
-       return x.flatten(0,1).T @ delta.flatten(0,1)
+       return torch.einsum('bti,btj->ij', x, delta)
+    
     def create_pad_mask_q(self, X):
 
             pad_q = (X == 0).unsqueeze(1).unsqueeze(3)  # (B, 1, T, 1)
