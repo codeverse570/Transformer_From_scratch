@@ -231,16 +231,16 @@ if __name__ == "__main__":
         #             padded = np.array([ids + [0] * (MAX_LEN - len(ids))])
         #             sample_t = torch.as_tensor(padded, device=device)
         #             predict(sample_t,np.array([ids]),model.encoder,model.decoder)
-        #         val_enc_k = _mask_k(x_val_encoder)
-        #         val_enc_q = _mask_q(x_val_encoder)
-        #         val_dec_k = _mask_k(x_val_decoder)
-        #         val_dec_q = _mask_q(x_val_decoder)
-        #         val_loss = calculate_validation_loss(
-        #     model.encoder, model.decoder,
-        #     x_val_encoder, x_val_decoder, x_val_target,
-        #     val_enc_k, val_enc_q, val_dec_k, val_dec_q,
-        # )
-        #         print(f"validation loss: {val_loss:.4f}")
+                val_enc_k = _mask_k(x_val_encoder)
+                val_enc_q = _mask_q(x_val_encoder)
+                val_dec_k = _mask_k(x_val_decoder)
+                val_dec_q = _mask_q(x_val_decoder)
+                val_loss = calculate_validation_loss(
+            model.encoder, model.decoder,
+            x_val_encoder, x_val_decoder, x_val_target,
+            val_enc_k, val_enc_q, val_dec_k, val_dec_q,
+        )
+                print(f"validation loss: {val_loss:.4f}")
 
         elapsed = time.perf_counter() - start_time
         print(f"epoch {epoch} done in {elapsed:.1f}s  "
