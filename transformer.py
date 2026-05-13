@@ -275,4 +275,4 @@ if __name__ == "__main__":
             sample_t = torch.as_tensor(padded, device=device)
             predict(sample_t,np.array([ids]),model.encoder,model.decoder)
             # predict is a quick inference pass – no mask storage needed
-        torch.save(model, f"./models/transformer-{epoch}.pth")
+        torch.save(model, f"../workspace/models/transformer-{epoch}.pth")
