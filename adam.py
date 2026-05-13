@@ -9,7 +9,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ─────────────────────────────────────────────────────────────────────────────
  
 class SchedulerState:
-    def __init__(self, base_lr, warmup_steps=4000, total_steps=1_000_000):
+    def __init__(self, base_lr, warmup_steps=4000, total_steps=100000):
         self.global_step   = 0
         self.base_lr       = base_lr
         self.warmup_steps  = warmup_steps

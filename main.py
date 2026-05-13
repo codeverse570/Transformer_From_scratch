@@ -55,7 +55,7 @@ def create_train_samples(ds):
      train_encoder_input= []
      train_decoder_input= []
      tokenizer=Tokenizer.from_file("bpe_translation.json")
-     for item in ds['train'].select(range(100000)):
+     for item in ds['train'].select(range(1000000)):
           t = item['translation']
           enc_inp= tokenizer.encode(t[SRC_LANG]).ids
           dec_inp= tokenizer.encode(t[TGT_LANG]).ids
