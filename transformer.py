@@ -223,9 +223,9 @@ if __name__ == "__main__":
         
             # print(iteration)
 
-            # if iteration% 200==0:
-            #     elapsed = time.perf_counter() - start_time
-            #     print(f"{iteration}-iter checkpoint: {elapsed:.1f}s")
+            if iteration% 1000==0:
+                elapsed = time.perf_counter() - start_time
+                print(f"{iteration}-iter checkpoint: {elapsed:.1f}s")
         #         for sample in samples:
         #             ids = tokenizer.encode(sample).ids
         #             padded = np.array([ids + [0] * (MAX_LEN - len(ids))])
