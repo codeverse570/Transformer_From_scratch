@@ -37,7 +37,7 @@ class Decoder(nn.Module):
         self.sent_len = sent_len
         self.layers = layers
         self.batch_size = batch_size
-        self.dropout= {'emb':Dropout(0),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+        self.dropout= {'emb':Dropout(),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
         
@@ -951,10 +951,10 @@ class Decoder(nn.Module):
                 self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
                 self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
                 # Cross attention
-                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight).T
-                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight).T
-                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight).T
-                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight).T
+                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq'].T   * coef, self.W_cross_q[layer].weight)
+                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck'].T   * coef, self.W_cross_k[layer].weight)
+                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv'].T   * coef, self.W_cross_v[layer].weight)
+                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co'].T  * coef, self.W_cross_o[layer].weight)
                 self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
                 self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
                 self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
@@ -963,10 +963,10 @@ class Decoder(nn.Module):
                 self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
                 self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
                 # Self attention
-                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight).T
-                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight).T
-                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight).T
-                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight).T
+                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'].T   * coef, self.W_q[layer].weight)
+                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'].T   * coef, self.W_k[layer].weight)
+                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'].T   * coef, self.W_v[layer].weight)
+                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'].T   * coef, self.W_o[layer].weight)
                 self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
                 self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
                 self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
@@ -1098,6 +1098,8 @@ def _mask_q(x: torch.Tensor) -> torch.Tensor:
     return (x == 0).unsqueeze(1).unsqueeze(3)
 
 def predict(y, target, encoder, decoder, max_len=128):
+    encoder.val()
+    decoder.val()
     enc_pad_k= _mask_k(y)
     enc_pad_q= _mask_q(y)
     E = encoder.fit_pre(y,enc_pad_k|enc_pad_q)
@@ -1130,7 +1132,8 @@ def predict(y, target, encoder, decoder, max_len=128):
             break
 
         i += 1
-        
+    encoder.clear_memory()
+    decoder.clear_memory()
 def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_val_target,enc_k,enc_q,dec_k,dec_q, batch_size=64):
     """
     Calculate validation loss without updating any weights.

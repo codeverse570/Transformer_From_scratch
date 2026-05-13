@@ -36,7 +36,7 @@ class Encoder():
       self.voc_size= voc_size
       self.sent_len= sent_len
       self.pad_mask=[]
-      self.dropout= {'emb':Dropout(0),'self_att_a':Dropout(),'self_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+      self.dropout= {'emb':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
       self.schedular=schedular
       self.emb = nn.Embedding(voc_size,self.d_model,device=device)
       self.pos= nn.Embedding(sent_len,self.d_model,device=device)
@@ -513,14 +513,14 @@ class Encoder():
                         self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
                         self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
                         # Self attention weights
-                        self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'] * coef, self.W_q[layer].weight).T
-                        self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'] * coef, self.W_k[layer].weight).T
-                        self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'] * coef, self.W_v[layer].weight).T
-                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'] * coef, self.W_o[layer].weight).T
+                        self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'].T * coef, self.W_q[layer].weight)
+                        self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'].T * coef, self.W_k[layer].weight)
+                        self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'].T * coef, self.W_v[layer].weight)
+                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'].T * coef, self.W_o[layer].weight)
                         # Self attention biases
-                        self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
-                        self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
-                        self.W_v[layer].bias -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
+                        self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b']* coef, self.W_q[layer].bias)
+                        self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b']* coef, self.W_k[layer].bias)
+                        self.W_v[layer].bias -= self.W_v_ada[layer].grad(store['sv_b']* coef, self.W_v[layer].bias)
                         self.W_o[layer].bias -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
                         # Attention norm
                         self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['att_alpha'] * coef, self.W_norm_att_a[layer])
