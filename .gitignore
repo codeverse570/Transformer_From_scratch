@@ -15,4 +15,3 @@ validate_decoder_target.npy
 train.txt
 validate.txt
 data/
-translation_data/
