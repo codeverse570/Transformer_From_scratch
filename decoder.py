@@ -127,6 +127,21 @@ class Decoder(nn.Module):
     # ─────────────────────────────────────────────
     # Initialisation helpers
     # ─────────────────────────────────────────────
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove compiled functions - they can't be pickled
+        for key in ['grad_ff', 'grad_cross_att', 'grad_multi_self_att', 'grad_layer_norm_pre']:
+            if key in state:
+                del state[key]
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Recompile after loading
+        self.grad_ff             = torch.compile(self.grad_ff,             backend='inductor', fullgraph=False)
+        self.grad_cross_att      = torch.compile(self.grad_cross_att,      backend='inductor', fullgraph=False)
+        self.grad_multi_self_att = torch.compile(self.grad_multi_self_att, backend='inductor', fullgraph=False)
+        self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre, backend='inductor', fullgraph=False)
     def intialize_optimizers(self):
         W_q_ada = []
         W_k_ada = []
@@ -337,9 +352,9 @@ class Decoder(nn.Module):
                 self.W_norm_ff_a[layer], self.W_norm_ff_b[layer],self.epsilon
             )
 
-            ff_layer_1 = F.relu(norm_cross_out @ self.W_ff1[layer].weight.T +self.W_ff1[layer].bias)
+            ff_layer_1 = F.relu( self.W_ff1[layer](norm_cross_out))
             ff_layer_1= self.dropout['ff_layer_1'].train(self.is_training).forward(ff_layer_1)
-            ff_output = ff_layer_1 @ self.W_ff2[layer].weight.T + self.W_ff2[layer].bias
+            ff_output =  self.W_ff2[layer](ff_layer_1)
 
             
 
@@ -511,9 +526,9 @@ class Decoder(nn.Module):
                 self.cross_att_k[layer],
                 self.cross_att_inputs[layer],
                 self.E,
-                self.W_cross_q[layer].weight,
-                self.W_cross_k[layer].weight,
-                self.W_cross_v[layer].weight
+                self.W_cross_q[layer].weight.T,
+                self.W_cross_k[layer].weight.T,
+                self.W_cross_v[layer].weight.T
             )
             # print(delta_x.abs().mean())
             # back through LN
@@ -548,9 +563,9 @@ class Decoder(nn.Module):
                 self.self_att_q[layer],
                 self.self_att_k[layer],
                 self.self_att_inputs[layer],
-                self.W_q[layer].weight,
-                self.W_k[layer].weight,
-                self.W_v[layer].weight
+                self.W_q[layer].weight.T,
+                self.W_k[layer].weight.T,
+                self.W_v[layer].weight.T
             )
 
             delta_att = self_delta_X_v + self_delta_X_k + self_delta_X_q
@@ -835,7 +850,7 @@ class Decoder(nn.Module):
         # print(heads_delta_o)
         # print(heads_delta_o.shape,V.shape)
         heads_delta_A= heads_delta_o@V.transpose(-2,-1)
-        # heads_delta_A= self.dropout['self_att_a'].backward(heads_delta_A)
+        heads_delta_A= self.dropout['self_att_a'].backward(heads_delta_A)
         heads_delta_V= A.transpose(-2,-1)@heads_delta_o
         dot_delA_A= (heads_delta_A * raw_A).sum(dim=-1, keepdim=True)
         heads_delta_S = raw_A * (heads_delta_A - dot_delA_A)
@@ -882,7 +897,7 @@ class Decoder(nn.Module):
         A = F.softmax(S, dim=-1)  
         A = torch.nan_to_num(A, nan=0.0)
         raw_A= A
-        # A= self.dropout['self_att_a'].train(self.is_training).forward(A)                                  # (B, H, T, T)
+        A= self.dropout['self_att_a'].train(self.is_training).forward(A)                                  # (B, H, T, T)
         O = (A @ V).transpose(1, 2).reshape(B, T, -1)   # (B, T, d_model)
         # O_flash,L=flash_attention_pytorch(Q,K,V,True,None,self.dec_k,self.dec_q)
         # print(O[0][0]==O_flash.transpose(1, 2).reshape(B, T, -1)[0][0])
@@ -922,6 +937,7 @@ class Decoder(nn.Module):
         var = X.var(dim=-1, keepdim=True, unbiased=False)
         std = torch.sqrt(var + epsilon)
         return ((X - mean) / std) * alpha + beta
+    
     def update_weights(self,coef):
          for store in self.grads:
             layer = store['layer']
@@ -935,10 +951,10 @@ class Decoder(nn.Module):
                 self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
                 self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
                 # Cross attention
-                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight)
-                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight)
-                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight)
-                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight)
+                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight).T
+                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight).T
+                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight).T
+                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight).T
                 self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
                 self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
                 self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
@@ -947,10 +963,10 @@ class Decoder(nn.Module):
                 self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
                 self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
                 # Self attention
-                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight)
-                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight)
-                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight)
-                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight)
+                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight).T
+                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight).T
+                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight).T
+                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight).T
                 self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
                 self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
                 self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
@@ -1071,30 +1087,47 @@ def log_grad_flow(decoder):
         print("Norm self alpha:", decoder.W_norm_self_a[i].abs().mean().item())
         print("Norm cross alpha:", decoder.W_norm_cross_a[i].abs().mean().item())
         print("Norm ff alpha:", decoder.W_norm_ff_a[i].abs().mean().item())
-def predict(y,target, encoder, decoder):
-    
-    
 
-    E,E_pad_mask = encoder.fit_pre(y)
+def _mask_k(x: torch.Tensor) -> torch.Tensor:
+    """Key-side pad mask  (B, 1, 1, T)  –  True where token == 0."""
+    return (x == 0).unsqueeze(1).unsqueeze(2)
 
-    start = torch.tensor([[2]], device=device)
 
-    print(tokenizer.decode(target[0].tolist()))
+def _mask_q(x: torch.Tensor) -> torch.Tensor:
+    """Query-side pad mask  (B, 1, T, 1)  –  True where token == 0."""
+    return (x == 0).unsqueeze(1).unsqueeze(3)
+
+def predict(y, target, encoder, decoder, max_len=128):
+    enc_pad_k= _mask_k(y)
+    enc_pad_q= _mask_q(y)
+    E = encoder.fit_pre(y,enc_pad_k|enc_pad_q)
+
+    # full padded sequence
+    start = torch.zeros((1, max_len), dtype=torch.long, device=device)
+
+    # BOS token
+    start[0, 0] = 2
     
-    
+    print(tokenizer.decode(y[0].tolist()))
+
     i = 0
-    while start[0, -1] != 3:
-        prob = decoder.fit_pre(start, E,E_pad_mask)
-
+    while i < max_len - 1 and start[0,len(start[0])-1]!=3:
+        pad_mask_k= _mask_k(start)
+        pad_mask_q= _mask_q(start)
+        logits = decoder.fit_pre(start, E,pad_mask_k|pad_mask_q,enc_pad_k|pad_mask_q) 
+        prob= F.softmax(logits,dim=-1)
+        
         token_prob, index = torch.max(prob, dim=-1)
-
+         
         next_token = index[0, i].item()
-
         print(tokenizer.decode([next_token]), end=" ")
 
-        start = torch.cat(
-            [start, torch.tensor([[next_token]], device=device)], dim=1
-        )
+        # insert next token into padded tensor
+        start[0, i + 1] = next_token
+
+        # EOS token
+        if next_token == 3:
+            break
 
         i += 1
         
@@ -1124,8 +1157,8 @@ def calculate_validation_loss(encoder, decoder, x_val_encoder, x_val_decoder, x_
             tgt_batch = x_val_target[i : i + batch_size]
 
             # ---------- forward passes ----------
-            E,E_pad_mask    = encoder.fit_pre(enc_batch,enc_k[i : i + batch_size],enc_q[i : i + batch_size])
-            logits = decoder.fit_pre(dec_batch, E,E_pad_mask,dec_k[i : i + batch_size],dec_q[i : i + batch_size])
+            E    = encoder.fit_pre(enc_batch,enc_k[i : i + batch_size]|enc_q[i : i + batch_size])
+            logits = decoder.fit_pre(dec_batch, E,dec_k[i : i + batch_size]|dec_q[i : i + batch_size],enc_k[i : i + batch_size]|dec_q[i : i + batch_size])
 
             # ---------- loss (mirrors your back_pre logic) ----------
             targets_t = tgt_batch.unsqueeze(-1)

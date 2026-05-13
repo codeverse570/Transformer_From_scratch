@@ -74,7 +74,20 @@ class Encoder():
       self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre,backend='inductor', fullgraph=False)
     #   nn.init.xavier_normal_(self.emb.weight)
     #   nn.init.xavier_normal_(self.pos.weight)
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        # Remove compiled functions - they can't be pickled
+        for key in ['grad_ff', 'grad_att', 'grad_layer_norm_pre']:
+            if key in state:
+                del state[key]
+        return state
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # Recompile after loading
+        self.grad_ff             = torch.compile(self.grad_ff,             backend='inductor', fullgraph=False)
+        self.grad_att = torch.compile(self.grad_att, backend='inductor', fullgraph=False)
+        self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre, backend='inductor', fullgraph=False)
     def intialize_weights(self):
         W_q, W_k, W_v, W_o = [], [], [], []
         W_ff1, W_ff2 = [], []
@@ -254,11 +267,10 @@ class Encoder():
              del_ff_r,del_ff_alpha,del_ff_beta= self.grad_layer_norm_pre(ff_x_grad,self.W_norm_ff_a[layer],self.W_norm_ff_b[layer],self.residual_ff[layer])
              att_delta_in= del_ff_r+new_delta  
              att_delta_X_k,att_delta_X_v,att_delta_X_q,att_delta_W_q,att_delta_W_k,att_delta_W_v,att_delta_W_o,\
-             att_delta_W_q_b,att_delta_W_k_b,att_delta_W_v_b,att_delta_W_o_b=self.grad_att(self.dropout['self_att_out'].backward(att_delta_in),self.W_o[layer].weight.T,self.att_o[layer],self.att_a[layer],self.att_raw_a[layer],self.att_v[layer],self.att_q[layer],self.att_k[layer],self.att_inputs[layer],self.W_q[layer].weight,self.W_k[layer].weight,self.W_v[layer].weight)
+             att_delta_W_q_b,att_delta_W_k_b,att_delta_W_v_b,att_delta_W_o_b=self.grad_att(self.dropout['self_att_out'].backward(att_delta_in),self.W_o[layer].weight.T,self.att_o[layer],self.att_a[layer],self.att_raw_a[layer],self.att_v[layer],self.att_q[layer],self.att_k[layer],self.att_inputs[layer],self.W_q[layer].weight.T,self.W_k[layer].weight.T,self.W_v[layer].weight.T)
              att_delta_out= (att_delta_X_v+att_delta_X_k+att_delta_X_q)
              del_att_r,del_att_alpha,del_att_beta= self.grad_layer_norm_pre(att_delta_out,self.W_norm_att_a[layer],self.W_norm_att_b[layer],self.residual_att[layer])
              new_delta =del_att_r+att_delta_in
-             
 
              layer_grad_store.append({
             'layer': layer,
@@ -501,10 +513,10 @@ class Encoder():
                         self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
                         self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
                         # Self attention weights
-                        self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'] * coef, self.W_q[layer].weight)
-                        self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'] * coef, self.W_k[layer].weight)
-                        self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'] * coef, self.W_v[layer].weight)
-                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'] * coef, self.W_o[layer].weight)
+                        self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'] * coef, self.W_q[layer].weight).T
+                        self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'] * coef, self.W_k[layer].weight).T
+                        self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'] * coef, self.W_v[layer].weight).T
+                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'] * coef, self.W_o[layer].weight).T
                         # Self attention biases
                         self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
                         self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)

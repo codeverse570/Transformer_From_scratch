@@ -165,28 +165,30 @@ if __name__ == "__main__":
 
     BATCH   = 64
     MAX_LEN = 128
-    epoch   = 11
+    epoch   = 2
 
     model = Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000,
                         max_len=MAX_LEN, layers=3, batch_size=BATCH)
+    # model = torch.load('./models/transformer-3.pth',weights_only=False)
 
     total_iteration = len(x_train_encoder) // BATCH
     tokenizer       = Tokenizer.from_file("bpe_translation.json")
 
     # move training data to GPU once; keep as int (bool masks built per-batch)
-    x_train_encoder = torch.as_tensor(x_train_encoder, device=device)
-    x_train_decoder = torch.as_tensor(x_train_decoder, device=device)
-    x_train_target  = torch.as_tensor(x_train_target,  device=device).long()
+    # x_train_encoder = torch.as_tensor(x_train_encoder, device=device)
+    # x_train_decoder = torch.as_tensor(x_train_decoder, device=device)
+    # x_train_target  = torch.as_tensor(x_train_target,  device=device).long()
     x_val_encoder   = torch.as_tensor(x_val_encoder,   device=device)
     x_val_decoder   = torch.as_tensor(x_val_decoder,   device=device)
     x_val_target    = torch.as_tensor(x_val_target,    device=device).long()
-
+    # for i in range(0,10):
+    #     print(tokenizer.decode(x_val_encoder[i].tolist()))
     # ── NO pre-computed masks for the whole dataset ────────────────────────
     # Old code built  x_train_encoder_com_mask  etc. of shape (N,1,1,T)
     # and kept them all in VRAM.  For N=50k, T=128 that is
     #   50000 × 1 × 128 × 128 × 1 byte  =  819 MB  just for one mask.
     # We now call make_masks() inside the loop for each mini-batch instead.
-
+    # predict(torch.as_tensor(x_train_encoder[1502:1503],device=device),torch.as_tensor(x_train_decoder[1502:1503],device=device),model.encoder,model.decoder)
     samples = [
         "Hello, how are you?",
         "The weather is nice today.",
@@ -194,16 +196,16 @@ if __name__ == "__main__":
         "The quick brown fox jumps over the lazy dog.",
     ]
 
-    start_time = time.perf_counter()
 
+    start_time = time.perf_counter()
     while epoch != 61:
         total_loss = 0.0
         iteration  = 1
 
         for i in range(0, len(x_train_encoder) - BATCH, BATCH):
-            enc_b = x_train_encoder[i : i + BATCH]
-            dec_b = x_train_decoder[i : i + BATCH]
-            tgt_b = x_train_target [i : i + BATCH]
+            enc_b = torch.as_tensor(x_train_encoder[i : i + BATCH],device=device)
+            dec_b = torch.as_tensor(x_train_decoder[i : i + BATCH],device=device)
+            tgt_b = torch.as_tensor(x_train_target [i : i + BATCH],device=device).long()
 
             # ── masks computed HERE, for this batch only ──────────────────
             # Each is bool (64, 1, 1/T, T) – freed as soon as fit() returns
@@ -218,18 +220,34 @@ if __name__ == "__main__":
 
             total_loss += loss
             iteration  += 1
+        
             print(iteration)
 
-            if iteration == 200:
+            if iteration% 200==0:
                 elapsed = time.perf_counter() - start_time
-                print(f"200-iter checkpoint: {elapsed:.1f}s")
+                print(f"{iteration}-iter checkpoint: {elapsed:.1f}s")
+        #         for sample in samples:
+        #             ids = tokenizer.encode(sample).ids
+        #             padded = np.array([ids + [0] * (MAX_LEN - len(ids))])
+        #             sample_t = torch.as_tensor(padded, device=device)
+        #             predict(sample_t,np.array([ids]),model.encoder,model.decoder)
+        #         val_enc_k = _mask_k(x_val_encoder)
+        #         val_enc_q = _mask_q(x_val_encoder)
+        #         val_dec_k = _mask_k(x_val_decoder)
+        #         val_dec_q = _mask_q(x_val_decoder)
+        #         val_loss = calculate_validation_loss(
+        #     model.encoder, model.decoder,
+        #     x_val_encoder, x_val_decoder, x_val_target,
+        #     val_enc_k, val_enc_q, val_dec_k, val_dec_q,
+        # )
+        #         print(f"validation loss: {val_loss:.4f}")
 
         elapsed = time.perf_counter() - start_time
         print(f"epoch {epoch} done in {elapsed:.1f}s  "
               f"| avg loss: {total_loss / total_iteration:.4f}")
 
-        if epoch % 5 == 0:
-            torch.save(model, f"../workspace/models/transformer-{epoch}.pth")
+        
+        
 
         epoch += 1
 
@@ -255,4 +273,6 @@ if __name__ == "__main__":
             ids = tokenizer.encode(sample).ids
             padded = np.array([ids + [0] * (MAX_LEN - len(ids))])
             sample_t = torch.as_tensor(padded, device=device)
+            predict(sample_t,np.array([ids]),model.encoder,model.decoder)
             # predict is a quick inference pass – no mask storage needed
+        torch.save(model, f"./models/transformer-{epoch}.pth")
