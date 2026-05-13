@@ -51,7 +51,7 @@ def make_masks(enc: torch.Tensor, dec: torch.Tensor):
 
 class Transformer:
     def __init__(self, voc_size, d_model, max_len, d_ff, h_count,
-                 layers, batch_size, lr=0.0003, epochs=40):
+                 layers, batch_size, lr=0.0001, epochs=40):
         self.schedular  = SchedulerState(lr, 4000, 1_000_000)
         self.d_model    = d_model
 
