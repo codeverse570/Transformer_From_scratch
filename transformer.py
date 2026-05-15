@@ -170,7 +170,7 @@ if __name__ == "__main__":
 
     model = Transformer(d_model=512, h_count=8, d_ff=2048, voc_size=16000,
                         max_len=MAX_LEN, layers=6, batch_size=BATCH)
-    # model = torch.load('./models/transformer-3.pth',weights_only=False)
+    # model = torch.load('./models/transformer-7.pth',weights_only=False)
 
     total_iteration = len(x_train_encoder) // BATCH
     tokenizer       = Tokenizer.from_file("bpe_translation.json")
@@ -278,4 +278,4 @@ if __name__ == "__main__":
             sample_t = torch.as_tensor(padded, device=device)
             predict(sample_t,np.array([ids]),model.encoder,model.decoder)
             # predict is a quick inference pass – no mask storage needed
-        # torch.save(model, f"../workspace/models/transformer-{epoch}.pth")
+        torch.save(model, f"../workspace/models/transformer-{epoch}.pth")
