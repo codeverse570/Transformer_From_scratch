@@ -105,7 +105,7 @@ class AdamCustom:
  
     # ── main update ───────────────────────────────────────────────────────────
  
-    def grad(self, G: torch.Tensor, W) -> torch.Tensor:
+    def grad(self, G: torch.Tensor, W=None) -> torch.Tensor:
         """
         Returns the Adam update tensor (same shape as G).
         All moment arithmetic is in-place; only `update` is a new tensor.

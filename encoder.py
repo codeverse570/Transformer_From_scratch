@@ -16,7 +16,7 @@ from pathlib import Path
 negative_inf = float('-inf')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.manual_seed(42)
-torch.set_default_dtype(torch.float32)
+# torch.set_default_dtype(torch.float32)
 # def _layer_norm(x: torch.Tensor, alpha: torch.Tensor, 
 #                 beta: torch.Tensor, epsilon: float) -> torch.Tensor:
 #     mean = x.mean(dim=-1, keepdim=True)
@@ -36,7 +36,7 @@ class Encoder():
       self.voc_size= voc_size
       self.sent_len= sent_len
       self.pad_mask=[]
-      self.dropout= {'emb':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+      self.dropout= {'emb':Dropout(0),'self_att_a':Dropout(),'self_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
       self.schedular=schedular
       self.emb = nn.Embedding(voc_size,self.d_model,device=device)
       self.pos= nn.Embedding(sent_len,self.d_model,device=device)
@@ -46,8 +46,8 @@ class Encoder():
       self.layers=layers
       self.is_training=True
       self.batch_size=batch_size
-      self.W_q,self.W_k,self.W_v,self.W_o,self.W_ff1,self.W_ff2,self.W_norm_ff_a,self.W_norm_ff_b,self.W_norm_att_a,self.W_norm_att_b= self.intialize_weights()
-      self.W_q_ada,self.W_k_ada,self.W_v_ada,self.W_o_ada,\
+      self.W_qkv,self.W_o,self.W_ff1,self.W_ff2,self.W_norm_ff_a,self.W_norm_ff_b,self.W_norm_att_a,self.W_norm_att_b= self.intialize_weights()
+      self.W_qkv_ada,self.W_o_ada,\
       self.W_ff1_ada,self.W_ff2_ada,\
       self.W_norm_self_a_ada,self.W_norm_self_b_ada,\
       self.W_norm_ff_a_ada,self.W_norm_ff_b_ada = self.intialize_optimizers()
@@ -89,10 +89,14 @@ class Encoder():
         self.grad_att = torch.compile(self.grad_att, backend='inductor', fullgraph=False)
         self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre, backend='inductor', fullgraph=False)
     def intialize_weights(self):
-        W_q, W_k, W_v, W_o = [], [], [], []
-        W_ff1, W_ff2 = [], []
-        W_norm_ff_a, W_norm_ff_b = [], []
-        W_norm_att_a, W_norm_att_b = [], []
+        W_qkv= nn.ModuleList()
+        W_o = nn.ModuleList()
+        W_ff1 = nn.ModuleList()
+        W_ff2 = nn.ModuleList()
+        W_norm_att_a  = nn.ParameterList()
+        W_norm_att_b  = nn.ParameterList()
+        W_norm_ff_a    = nn.ParameterList()
+        W_norm_ff_b    = nn.ParameterList()
 
         std_qk    = 1.0 / math.sqrt(self.d_model)
         std_general = 0.02
@@ -101,22 +105,21 @@ class Encoder():
         for i in range(self.layers):
 
             # ── Attention projections ──────────────────────────
-            Wq = nn.Linear(self.d_model, self.d_model, device=device)
-            Wk = nn.Linear(self.d_model, self.d_model, device=device)
-            Wv = nn.Linear(self.d_model, self.d_model, device=device)
+
             Wo = nn.Linear(self.d_model, self.d_model, device=device)
+            Wqkv= nn.Linear(self.d_model,3*self.d_model,device=device)
 
             # Q, K: unit variance dot products before 1/√d_k scaling
-            nn.init.normal_(Wq.weight, mean=0.0, std=std_qk)
-            nn.init.normal_(Wk.weight, mean=0.0, std=std_qk)
 
-            # V: standard scale, no amplification
-            nn.init.normal_(Wv.weight, mean=0.0, std=std_general)
 
             # W_o: residual exit — scale down to prevent variance accumulation
             nn.init.normal_(Wo.weight, mean=0.0, std=std_general * res_scale)
-
-            for m in [Wq, Wk, Wv, Wo]:
+            nn.init.normal_(Wqkv.weight[:self.d_model],    mean=0.0, std=std_qk)
+        # K block  — rows d_model .. 2*d_model
+            nn.init.normal_(Wqkv.weight[self.d_model:2*self.d_model], mean=0.0, std=std_qk)
+        # V block  — rows 2*d_model .. 3*d_model
+            nn.init.normal_(Wqkv.weight[2*self.d_model:],  mean=0.0, std=std_qk)
+            for m in [ Wo,Wqkv]:
                 nn.init.zeros_(m.bias)
 
             # ── Feed Forward ───────────────────────────────────
@@ -135,8 +138,7 @@ class Encoder():
             nn.init.zeros_(Wff2.bias)
 
             # ── Layer Norms ────────────────────────────────────
-            W_q.append(Wq);  W_k.append(Wk)
-            W_v.append(Wv);  W_o.append(Wo)
+            W_qkv.append(Wqkv);  W_o.append(Wo)
             W_ff1.append(Wff1); W_ff2.append(Wff2)
 
             W_norm_ff_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
@@ -144,14 +146,12 @@ class Encoder():
             W_norm_att_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
             W_norm_att_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
 
-        return (W_q, W_k, W_v, W_o,
+        return (W_qkv,W_o,
                 W_ff1, W_ff2,
                 W_norm_ff_a, W_norm_ff_b,
                 W_norm_att_a, W_norm_att_b)
     def intialize_optimizers(self):
-       W_q_ada=[]
-       W_k_ada=[]
-       W_v_ada=[]
+       W_qkv_ada=[]
        W_o_ada=[] 
        W_ff1_ada=[]
        W_ff2_ada=[] 
@@ -160,9 +160,6 @@ class Encoder():
        W_norm_ff_a_ada=[]
        W_norm_ff_b_ada=[]      
        for i in range(self.layers):
-          W_q_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))
-          W_k_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))
-          W_v_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))
           W_o_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))
           W_ff1_ada.append(AdamCustom(0.99,self.d_ff,self.d_model,0.01,schedular=self.schedular))
           W_ff2_ada.append(AdamCustom(0.99,self.d_model,self.d_ff,0.01,schedular=self.schedular))
@@ -170,7 +167,8 @@ class Encoder():
           W_norm_self_b_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))  
           W_norm_ff_a_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))
           W_norm_ff_b_ada.append(AdamCustom(0.99,self.d_model,self.d_model,0.01,schedular=self.schedular))
-       return W_q_ada,W_k_ada,W_v_ada,W_o_ada,W_ff1_ada,W_ff2_ada,W_norm_self_a_ada,W_norm_self_b_ada,W_norm_ff_a_ada,W_norm_ff_b_ada
+          W_qkv_ada.append(AdamCustom(0.99, 3*self.d_model, self.d_model, 0.01,schedular=self.schedular))
+       return W_qkv_ada,W_o_ada,W_ff1_ada,W_ff2_ada,W_norm_self_a_ada,W_norm_self_b_ada,W_norm_ff_a_ada,W_norm_ff_b_ada
 
     def forward(self,x):
        pass
@@ -266,9 +264,9 @@ class Encoder():
              ff_w1_grad,ff_b1_grad,ff_w2_grad,ff_b2_grad,ff_x_grad=self.grad_ff(self.dropout['ff_out'].backward(new_delta),self.ff_layer_1_output[layer],self.W_ff2[layer].weight.T,self.W_ff1[layer].weight.T,self.ff_inputs[layer])
              del_ff_r,del_ff_alpha,del_ff_beta= self.grad_layer_norm_pre(ff_x_grad,self.W_norm_ff_a[layer],self.W_norm_ff_b[layer],self.residual_ff[layer])
              att_delta_in= del_ff_r+new_delta  
-             att_delta_X_k,att_delta_X_v,att_delta_X_q,att_delta_W_q,att_delta_W_k,att_delta_W_v,att_delta_W_o,\
-             att_delta_W_q_b,att_delta_W_k_b,att_delta_W_v_b,att_delta_W_o_b=self.grad_att(self.dropout['self_att_out'].backward(att_delta_in),self.W_o[layer].weight.T,self.att_o[layer],self.att_a[layer],self.att_raw_a[layer],self.att_v[layer],self.att_q[layer],self.att_k[layer],self.att_inputs[layer],self.W_q[layer].weight.T,self.W_k[layer].weight.T,self.W_v[layer].weight.T)
-             att_delta_out= (att_delta_X_v+att_delta_X_k+att_delta_X_q)
+             att_delta_x,att_delta_W_o,\
+             att_delta_W_o_b,att_delta_W_qkv,att_delta_W_qkv_b=self.grad_att(self.dropout['self_att_out'].backward(att_delta_in),self.W_o[layer].weight.T,self.att_o[layer],self.att_a[layer],self.att_raw_a[layer],self.att_v[layer],self.att_q[layer],self.att_k[layer],self.att_inputs[layer],self.W_qkv[layer].weight.T)
+             att_delta_out= att_delta_x
              del_att_r,del_att_alpha,del_att_beta= self.grad_layer_norm_pre(att_delta_out,self.W_norm_att_a[layer],self.W_norm_att_b[layer],self.residual_att[layer])
              new_delta =del_att_r+att_delta_in
 
@@ -280,11 +278,11 @@ class Encoder():
             # FF norm
             'ff_alpha': del_ff_alpha, 'ff_beta': del_ff_beta,
             # Self attention weights
-            'sq': att_delta_W_q,  'sk': att_delta_W_k,
-            'sv': att_delta_W_v,  'so': att_delta_W_o,
+              'so': att_delta_W_o,
+              'sqkv':att_delta_W_qkv,
+               'sqkv_b':att_delta_W_qkv_b,
             # Self attention biases
-            'sq_b': att_delta_W_q_b, 'sk_b': att_delta_W_k_b,
-            'sv_b': att_delta_W_v_b, 'so_b': att_delta_W_o_b,
+            'so_b': att_delta_W_o_b,
             # Attention norm
             'att_alpha': del_att_alpha, 'att_beta': del_att_beta,
         })
@@ -323,8 +321,10 @@ class Encoder():
                     store['ff_w1'],  store['ff_b1'],
                     store['ff_w2'],  store['ff_b2'],
                     store['ff_alpha'], store['ff_beta'],
-                    store['sq'],  store['sk'],  store['sv'],  store['so'],
-                    store['sq_b'], store['sk_b'], store['sv_b'], store['so_b'],
+                      store['so'],
+                      store['sqkv'],
+                      store['sqkv_b'],
+                    store['so_b'],
                     store['att_alpha'], store['att_beta'],
                 ]
 
@@ -431,7 +431,7 @@ class Encoder():
         
         return delta_ff_w1, delta_ff_b1, delta_ff_w2, delta_ff_b2, delta_x
     
-    def grad_att(self,delta,W_o,O,A,raw_A,V,Q,K,X,W_q,W_k,W_v):
+    def grad_att(self,delta,W_o,O,A,raw_A,V,Q,K,X,W_qkv):
         B, T, _ = delta.shape
         delta_o = delta @ W_o.T
         # delta_W_o = torch.einsum('bti,btj->ij', O, delta)
@@ -448,32 +448,23 @@ class Encoder():
         heads_delta_V= heads_delta_V.transpose(1, 2).reshape(B, T, -1)
         heads_delta_Q= heads_delta_Q.transpose(1, 2).reshape(B, T, -1)  
         heads_delta_K= heads_delta_K.transpose(1,2).reshape(B, T, -1) 
-        delta_X_K = heads_delta_K @ W_k.T
-        delta_X_V = heads_delta_V @ W_v.T
-        delta_X_Q = heads_delta_Q @ W_q.T
-        # delta_W_q= torch.einsum('bti,btj->ij', X, heads_delta_Q)
-        # delta_W_k = torch.einsum('bti,btj->ij', X, heads_delta_K)
-        # delta_W_v = torch.einsum('bti,btj->ij', X, heads_delta_V)
-        delta_W_q=self._weight_grad(X,heads_delta_Q)
-        delta_W_k=self._weight_grad(X,heads_delta_K)
-        delta_W_v= self._weight_grad(X,heads_delta_V)  
-        delta_W_q_b=  heads_delta_Q.sum(dim=(0,1))
-        delta_W_k_b = heads_delta_K.sum(dim=(0,1))
-        delta_W_v_b=  heads_delta_V.sum(dim=(0,1))
-        return delta_X_K,delta_X_V,delta_X_Q,delta_W_q,delta_W_k,delta_W_v,delta_W_o,delta_W_q_b,delta_W_k_b,delta_W_v_b,delta_W_o_b
+        heads_delta_qkv = torch.cat([heads_delta_Q, heads_delta_K, heads_delta_V], dim=-1)
+
+        # one weight grad instead of three
+        delta_W_qkv   = self._weight_grad(X, heads_delta_qkv)        # (d_model, 3*d_model)
+        delta_W_qkv_b = heads_delta_qkv.sum(dim=(0, 1))              # (3*d_model,)
+
+        # input gradient — project back through full W_qkv
+        delta_X = heads_delta_qkv @ W_qkv.T       
+        return delta_X,delta_W_o,delta_W_o_b,delta_W_qkv,delta_W_qkv_b
 
     def self_attention(self,X,layer):
        B, T, _ = X.shape
-       Wq= self.W_q[layer]
-       Wk= self.W_k[layer]
-       Wv= self.W_v[layer]
-    #    Wq_b = self.W_q[layer].bias
-    #    Wk_b = self.W_k[layer].bias
-    #    Wv_b = self.W_v[layer].bias
-        # print(Wk.shape)
-       Q = ( Wq(X)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-       K = (Wk(X)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-       V = (Wv(X)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+       qkv = self.W_qkv[layer](X)          # (B, T, 3*d_model)
+       Q, K, V = qkv.chunk(3, dim=-1)
+       Q = Q.view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
+       K = K.view(B, T, self.h_count, self.d_k).transpose(1, 2)
+       V = V.view(B, T, self.h_count, self.d_k).transpose(1, 2)
        temp=1
        
        S = Q @ K.transpose(-2, -1) / (math.sqrt(self.d_k)*temp)        # (B, H, T, T)
@@ -496,6 +487,7 @@ class Encoder():
 
     
     def layer_norm(self, X, alpha, beta,epsilon):
+      with torch.autocast(device_type='cuda', enabled=False):
         mean = X.mean(dim=-1, keepdim=True)          # ← fix dim
         var  = X.var(dim=-1, keepdim=True, unbiased=False)
         std  = torch.sqrt(var + epsilon)
@@ -505,26 +497,22 @@ class Encoder():
                     layer = store['layer']
                     with torch.no_grad():
                         # FF weights
-                        self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
-                        self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
-                        self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
-                        self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
+                        self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef)
+                        self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef)
+                        self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef)
+                        self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef)
                         # FF norm
-                        self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
-                        self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
+                        self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef)
+                        self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef)
                         # Self attention weights
-                        self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'].T * coef, self.W_q[layer].weight)
-                        self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'].T * coef, self.W_k[layer].weight)
-                        self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'].T * coef, self.W_v[layer].weight)
-                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'].T * coef, self.W_o[layer].weight)
+                        self.W_qkv[layer].weight -= self.W_qkv_ada[layer].grad(store['sqkv'].T * coef)
+                        self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'].T * coef)
                         # Self attention biases
-                        self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b']* coef, self.W_q[layer].bias)
-                        self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b']* coef, self.W_k[layer].bias)
-                        self.W_v[layer].bias -= self.W_v_ada[layer].grad(store['sv_b']* coef, self.W_v[layer].bias)
-                        self.W_o[layer].bias -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
+                        self.W_qkv[layer].bias -= self.W_qkv_ada[layer].grad(store['sqkv_b']* coef)
+                        self.W_o[layer].bias -= self.W_o_ada[layer].grad(store['so_b'] * coef)
                         # Attention norm
-                        self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['att_alpha'] * coef, self.W_norm_att_a[layer])
-                        self.W_norm_att_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['att_beta']  * coef, self.W_norm_att_b[layer])
+                        self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['att_alpha'] * coef)
+                        self.W_norm_att_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['att_beta']  * coef)
  
     def create_pad_mask_k(self, X):
         if not isinstance(X, torch.Tensor):

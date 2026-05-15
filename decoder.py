@@ -21,8 +21,8 @@ tokenizer = Tokenizer.from_file("bpe_translation.json")
 
 from utils.utils import abs_mean
 negative_inf = float('-inf')
-torch.set_default_dtype(torch.float32)
-torch.set_float32_matmul_precision('high')
+# torch.set_default_dtype(torch.float32)
+# torch.set_float32_matmul_precision('high')
 
 
 class Decoder(nn.Module):
@@ -37,7 +37,7 @@ class Decoder(nn.Module):
         self.sent_len = sent_len
         self.layers = layers
         self.batch_size = batch_size
-        self.dropout= {'emb':Dropout(),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
+        self.dropout= {'emb':Dropout(0),'enc_out':Dropout(),'self_att_a':Dropout(),'self_att_out':Dropout(),'cross_att_a':Dropout(),'cross_att_out':Dropout(),'ff_layer_1':Dropout(),'ff_out':Dropout()}
         self.schedular=schedular
         self.D = []
         
@@ -48,14 +48,14 @@ class Decoder(nn.Module):
         self.pos = nn.Embedding(sent_len, self.d_model,device=device)
         self.pos_ada = AdamCustom(0.99, self.sent_len, self.d_model, 0.01,schedular=self.schedular)
         self.sin_pos= self.get_sinusoidal_positional_encoding(self.sent_len,self.d_model)
-        self.W_q, self.W_k, self.W_v, self.W_o, \
+        self.W_o, \
         self.W_ff1, self.W_ff2, \
         self.W_norm_self_a, self.W_norm_self_b, \
         self.W_norm_cross_a, self.W_norm_cross_b, \
         self.W_norm_ff_a, self.W_norm_ff_b, \
-        self.W_cross_q, self.W_cross_k, self.W_cross_v, self.W_cross_o = self.intialize_weights()
+        self.W_cross_q, self.W_cross_k, self.W_cross_v, self.W_cross_o,self.W_qkv = self.intialize_weights()
 
-        self.W_q_ada, self.W_k_ada, self.W_v_ada, self.W_o_ada, \
+        self.W_qkv_ada, self.W_o_ada, \
         self.W_ff1_ada, self.W_ff2_ada, \
         self.W_norm_self_a_ada, self.W_norm_self_b_ada, \
         self.W_norm_cross_a_ada, self.W_norm_cross_b_ada, \
@@ -113,10 +113,7 @@ class Decoder(nn.Module):
         self.delta_H    = torch.zeros(batch_size, sent_len, d_model, device=device)
         self.delta_z    = torch.zeros(batch_size, sent_len, voc_size, device=device)
         self.emb_grad   = torch.zeros(voc_size, d_model, device=device)
-        self.W_qkv = nn.ModuleList([
-            nn.Linear(d_model, 3 * d_model, device=device) 
-            for _ in range(layers)
-        ])
+        
         # self.grad_cross_att = torch.compile(self.grad_cross_att, backend='aot_eager')
         # self.masked_self_att  = torch.compile(self.masked_self_att,   backend='aot_eager')
         # self.grad_ff= torch.compile(self.grad_ff,backend='aot_eager')
@@ -143,10 +140,9 @@ class Decoder(nn.Module):
         self.grad_multi_self_att = torch.compile(self.grad_multi_self_att, backend='inductor', fullgraph=False)
         self.grad_layer_norm_pre = torch.compile(self.grad_layer_norm_pre, backend='inductor', fullgraph=False)
     def intialize_optimizers(self):
-        W_q_ada = []
-        W_k_ada = []
-        W_v_ada = []
+
         W_o_ada = []
+        W_qkv_ada = []
         W_cross_q_ada = []
         W_cross_k_ada = []
         W_cross_v_ada = []
@@ -159,11 +155,9 @@ class Decoder(nn.Module):
         W_norm_cross_b_ada = []
         W_norm_ff_a_ada = []
         W_norm_ff_b_ada = []
-
+        
         for i in range(self.layers):
-            W_q_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
-            W_k_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
-            W_v_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
+            W_qkv_ada.append(AdamCustom(0.99, 3*self.d_model, self.d_model, 0.01,schedular=self.schedular))
             W_o_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
             W_cross_q_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
             W_cross_k_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
@@ -178,7 +172,7 @@ class Decoder(nn.Module):
             W_norm_ff_a_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
             W_norm_ff_b_ada.append(AdamCustom(0.99, self.d_model, self.d_model, 0.01,schedular=self.schedular))
 
-        return (W_q_ada, W_k_ada, W_v_ada, W_o_ada,
+        return (W_qkv_ada, W_o_ada,
                 W_ff1_ada, W_ff2_ada,
                 W_norm_self_a_ada, W_norm_self_b_ada,
                 W_norm_cross_a_ada, W_norm_cross_b_ada,
@@ -186,9 +180,10 @@ class Decoder(nn.Module):
                 W_cross_q_ada, W_cross_k_ada, W_cross_v_ada, W_cross_o_ada)
     
     def intialize_weights(self):
-        W_q = nn.ModuleList()
-        W_k = nn.ModuleList()
-        W_v = nn.ModuleList()
+        # W_q = nn.ModuleList()
+        # W_k = nn.ModuleList()
+        # W_v = nn.ModuleList()
+        W_qkv= nn.ModuleList()
         W_o = nn.ModuleList()
         W_cross_q = nn.ModuleList()
         W_cross_k = nn.ModuleList()
@@ -209,27 +204,31 @@ class Decoder(nn.Module):
 
         for i in range(self.layers):
             # ── Attention projections ──────────────────────────
-            Wq  = nn.Linear(self.d_model, self.d_model, device=device)
-            Wk  = nn.Linear(self.d_model, self.d_model, device=device)
-            Wv  = nn.Linear(self.d_model, self.d_model, device=device)
+            # Wq  = nn.Linear(self.d_model, self.d_model, device=device)
+            # Wk  = nn.Linear(self.d_model, self.d_model, device=device)
+            # Wv  = nn.Linear(self.d_model, self.d_model, device=device)
+            Wqkv= nn.Linear(self.d_model,3*self.d_model,device=device)
             Wo  = nn.Linear(self.d_model, self.d_model, device=device)
             Wcq = nn.Linear(self.d_model, self.d_model, device=device)
             Wck = nn.Linear(self.d_model, self.d_model, device=device)
             Wcv = nn.Linear(self.d_model, self.d_model, device=device)
             Wco = nn.Linear(self.d_model, self.d_model, device=device)
 
-            nn.init.normal_(Wq.weight,  mean=0.0, std=std_qk)
-            nn.init.normal_(Wk.weight,  mean=0.0, std=std_qk)
+        
             nn.init.normal_(Wcq.weight, mean=0.0, std=std_qk)
             nn.init.normal_(Wck.weight, mean=0.0, std=std_qk)
 
-            nn.init.normal_(Wv.weight,  mean=0.0, std=std_general)
+
             nn.init.normal_(Wcv.weight, mean=0.0, std=std_general)
 
             nn.init.normal_(Wo.weight,  mean=0.0, std=std_general * res_scale)
             nn.init.normal_(Wco.weight, mean=0.0, std=std_general * res_scale)
-
-            for m in [Wq, Wk, Wv, Wo, Wcq, Wck, Wcv, Wco]:
+            nn.init.normal_(Wqkv.weight[:self.d_model],    mean=0.0, std=std_qk)
+        # K block  — rows d_model .. 2*d_model
+            nn.init.normal_(Wqkv.weight[self.d_model:2*self.d_model], mean=0.0, std=std_qk)
+        # V block  — rows 2*d_model .. 3*d_model
+            nn.init.normal_(Wqkv.weight[2*self.d_model:],  mean=0.0, std=std_qk)
+            for m in [ Wo, Wcq, Wck, Wcv, Wco,Wqkv]:
                 nn.init.zeros_(m.bias)
 
             # ── Feed Forward ───────────────────────────────────
@@ -245,11 +244,10 @@ class Decoder(nn.Module):
             nn.init.zeros_(Wff2.bias)
 
             # ── Append to ModuleLists ──────────────────────────
-            W_q.append(Wq);       W_k.append(Wk)
-            W_v.append(Wv);       W_o.append(Wo)
             W_cross_q.append(Wcq); W_cross_k.append(Wck)
             W_cross_v.append(Wcv); W_cross_o.append(Wco)
             W_ff1.append(Wff1);   W_ff2.append(Wff2)
+            W_qkv.append(Wqkv),W_o.append(Wo)
 
             # ── Layer Norms ────────────────────────────────────
             W_norm_self_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
@@ -258,12 +256,12 @@ class Decoder(nn.Module):
             W_norm_cross_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
             W_norm_ff_a.append(nn.Parameter(torch.ones(self.d_model,  device=device)))
             W_norm_ff_b.append(nn.Parameter(torch.zeros(self.d_model, device=device)))
-
-        return (W_q, W_k, W_v, W_o, W_ff1, W_ff2,
+            
+        return ( W_o, W_ff1, W_ff2,
                 W_norm_self_a, W_norm_self_b,
                 W_norm_cross_a, W_norm_cross_b,
                 W_norm_ff_a, W_norm_ff_b,
-                W_cross_q, W_cross_k, W_cross_v, W_cross_o)
+                W_cross_q, W_cross_k, W_cross_v, W_cross_o,W_qkv)
 
     # ─────────────────────────────────────────────
     # Forward pass
@@ -552,8 +550,8 @@ class Decoder(nn.Module):
             delta_residual = delta_self_out
             delta_self = delta_self_out
 
-            self_delta_X_k, self_delta_X_v, self_delta_X_q, \
-            self_delta_W_q, self_delta_W_k, self_delta_W_v, self_delta_W_o, self_delta_W_q_b, self_delta_W_k_b, self_delta_W_v_b, self_delta_W_o_b = self.grad_multi_self_att(
+            self_delta_X, \
+             self_delta_W_o, self_delta_W_o_b,self_delta_W_qkv,self_delta_W_qkv_b = self.grad_multi_self_att(
                 self.dropout['self_att_out'].backward(delta_self),
                 self.W_o[layer].weight.T,
                 self.self_att_o[layer],
@@ -563,12 +561,10 @@ class Decoder(nn.Module):
                 self.self_att_q[layer],
                 self.self_att_k[layer],
                 self.self_att_inputs[layer],
-                self.W_q[layer].weight.T,
-                self.W_k[layer].weight.T,
-                self.W_v[layer].weight.T
+                self.W_qkv[layer].weight.T
             )
 
-            delta_att = self_delta_X_v + self_delta_X_k + self_delta_X_q
+            delta_att = self_delta_X
             # print(delta_att.abs().mean())
             # back through LN
             delta_ln_self, self_alpha_grad, self_beta_grad = self.grad_layer_norm_pre(
@@ -597,10 +593,12 @@ class Decoder(nn.Module):
             # Cross norm
             'cross_alpha': cross_alpha_grad, 'cross_beta': cross_beta_grad,
             # Self attention
-            'sq': self_delta_W_q, 'sk': self_delta_W_k,
-            'sv': self_delta_W_v, 'so': self_delta_W_o,
-            'sq_b': self_delta_W_q_b, 'sk_b': self_delta_W_k_b,
-            'sv_b': self_delta_W_v_b, 'so_b': self_delta_W_o_b,
+            
+             'so': self_delta_W_o,
+            
+             'so_b': self_delta_W_o_b,
+             'sqkv':self_delta_W_qkv,
+             'sqkv_b':self_delta_W_qkv_b,
             # Self norm
             'self_alpha': self_alpha_grad, 'self_beta': self_beta_grad,
         })
@@ -674,8 +672,8 @@ class Decoder(nn.Module):
                 store['cq'],  store['ck'],  store['cv'],  store['co'],
                 store['cq_b'], store['ck_b'], store['cv_b'], store['co_b'],
                 store['cross_alpha'], store['cross_beta'],
-                store['sq'],  store['sk'],  store['sv'],  store['so'],
-                store['sq_b'], store['sk_b'], store['sv_b'], store['so_b'],
+                 store['so'],
+                store['sqkv'],store['sqkv_b'], store['so_b'],
                 store['self_alpha'], store['self_beta'],
             ]
 
@@ -837,7 +835,7 @@ class Decoder(nn.Module):
         delta_W_v_b=  heads_delta_V.sum(dim=(0,1))
         return delta_E_K, delta_E_V, delta_X_Q, delta_W_q, delta_W_k, delta_W_v, delta_W_o,delta_W_q_b,delta_W_k_b,delta_W_v_b,delta_W_o_b
 
-    def grad_multi_self_att(self, delta, W_o, O, A,raw_A, V, Q, K, X, W_q, W_k, W_v):
+    def grad_multi_self_att(self, delta, W_o, O, A,raw_A, V, Q, K, X, W_qkv):
         B, T, _ = delta.shape
         delta_o = delta @ W_o.T
         
@@ -860,9 +858,6 @@ class Decoder(nn.Module):
         heads_delta_V= heads_delta_V.transpose(1, 2).reshape(B, T, -1)  
         heads_delta_Q= heads_delta_Q.transpose(1, 2).reshape(B, T, -1)  
         heads_delta_K= heads_delta_K.transpose(1,2).reshape(B, T, -1) 
-        delta_X_K = heads_delta_K @ W_k.T
-        delta_X_V = heads_delta_V @ W_v.T
-        delta_X_Q = heads_delta_Q @ W_q.T
         # dq,dk,dv=flash_attention_backward(Q,K,V,O.view(B, T, self.h_count, self.d_k).transpose(1,2),heads_delta_o,L)
 
         # delta_W_q= torch.einsum('bti,btj->ij', X, heads_delta_Q)
@@ -871,23 +866,27 @@ class Decoder(nn.Module):
         # delta_W_q=(X.view(-1, self.d_model).T @ heads_delta_Q.view(-1, self.d_model))
         # delta_W_k=(X.view(-1, self.d_model).T @ heads_delta_K.view(-1, self.d_model))
         # delta_W_v=(X.view(-1, self.d_model).T @ heads_delta_V.view(-1, self.d_model))
-        delta_W_q=self._weight_grad(X,heads_delta_Q)
-        delta_W_k=self._weight_grad(X,heads_delta_K)
-        delta_W_v= self._weight_grad(X,heads_delta_V)  
-        delta_W_q_b=  heads_delta_Q.sum(dim=(0,1))
-        delta_W_k_b = heads_delta_K.sum(dim=(0,1))
-        delta_W_v_b=  heads_delta_V.sum(dim=(0,1))
+        heads_delta_qkv = torch.cat([heads_delta_Q, heads_delta_K, heads_delta_V], dim=-1)
+
+        # one weight grad instead of three
+        delta_W_qkv   = self._weight_grad(X, heads_delta_qkv)        # (d_model, 3*d_model)
+        delta_W_qkv_b = heads_delta_qkv.sum(dim=(0, 1))              # (3*d_model,)
+
+        # input gradient — project back through full W_qkv
+        delta_X = heads_delta_qkv @ W_qkv.T       
    
-        return delta_X_K, delta_X_V, delta_X_Q, delta_W_q, delta_W_k, delta_W_v, delta_W_o,delta_W_q_b,delta_W_k_b,delta_W_v_b,delta_W_o_b
+        return delta_X, delta_W_o,delta_W_o_b,delta_W_qkv,delta_W_qkv_b
 
     # ─────────────────────────────────────────────
     # Attention & norm
     # ─────────────────────────────────────────────
     def masked_self_att(self, x, layer):
         B, T, _ = x.shape
-        Q = (self.W_q[layer](x)).view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
-        K = (self.W_k[layer](x)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
-        V = (self.W_v[layer](x)).view(B, T, self.h_count, self.d_k).transpose(1, 2)
+        qkv = self.W_qkv[layer](x)          # (B, T, 3*d_model)
+        Q, K, V = qkv.chunk(3, dim=-1)
+        Q = Q.view(B, T, self.h_count, self.d_k).transpose(1, 2)  # (B, H, T, d_k)
+        K = K.view(B, T, self.h_count, self.d_k).transpose(1, 2)
+        V = V.view(B, T, self.h_count, self.d_k).transpose(1, 2)
         temp=1
         S = Q @ K.transpose(-2, -1) /(math.sqrt(self.d_k)*temp)  
         pad_mask = self.pad_mask_combined    # (B, H, T, T)
@@ -933,6 +932,7 @@ class Decoder(nn.Module):
         return output, O, Q, K, V,  A,raw_A
 
     def layer_norm(self, X, alpha, beta,epsilon):
+      with torch.autocast(device_type='cuda', enabled=False):
         mean = X.mean(dim=-1, keepdim=True)
         var = X.var(dim=-1, keepdim=True, unbiased=False)
         std = torch.sqrt(var + epsilon)
@@ -943,37 +943,34 @@ class Decoder(nn.Module):
             layer = store['layer']
             with torch.no_grad():
                 # FF
-                self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
-                self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
-                self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
-                self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
+                self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef)
+                self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef)
+                self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef)
+                self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef)
                 # FF norm
-                self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
-                self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
+                self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef)
+                self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef)
                 # Cross attention
-                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq'].T   * coef, self.W_cross_q[layer].weight)
-                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck'].T   * coef, self.W_cross_k[layer].weight)
-                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv'].T   * coef, self.W_cross_v[layer].weight)
-                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co'].T  * coef, self.W_cross_o[layer].weight)
-                self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
-                self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
-                self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
-                self.W_cross_o[layer].bias   -= self.W_cross_o_ada[layer].grad(store['co_b'] * coef, self.W_cross_o[layer].bias)
+                self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq'].T   * coef)
+                self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck'].T   * coef)
+                self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv'].T   * coef)
+                self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co'].T  * coef)
+                self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef)
+                self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef)
+                self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef)
+                self.W_cross_o[layer].bias   -= self.W_cross_o_ada[layer].grad(store['co_b'] * coef)
                 # Cross norm
-                self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
-                self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
+                self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef)
+                self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef)
                 # Self attention
-                self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'].T   * coef, self.W_q[layer].weight)
-                self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'].T   * coef, self.W_k[layer].weight)
-                self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'].T   * coef, self.W_v[layer].weight)
-                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'].T   * coef, self.W_o[layer].weight)
-                self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
-                self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
-                self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
-                self.W_o[layer].bias   -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
+             
+                self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'].T   * coef)
+                self.W_qkv[layer].weight-= self.W_qkv_ada[layer].grad(store['sqkv'].T*coef)
+                self.W_o[layer].bias   -= self.W_o_ada[layer].grad(store['so_b'] * coef)
+                self.W_qkv[layer].bias-= self.W_qkv_ada[layer].grad(store['sqkv_b']*coef)
                 # Self norm
-                self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef, self.W_norm_self_a[layer])
-                self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef, self.W_norm_self_b[layer])
+                self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef)
+                self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef)
         
     def clip_grad_norm(self, all_grads, max_norm=1.0):
         """Compute global norm across all encoder gradients and return clip coefficient."""

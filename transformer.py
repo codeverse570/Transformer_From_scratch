@@ -91,6 +91,7 @@ class Transformer:
         E    = self.encoder.fit_pre(encoder_inputs, enc_comb)
         prob = self.decoder.fit_pre(decoder_inputs, E,
                                     dec_comb, dec_cross_comb)
+        # print(E.dtype)
 
         self.schedular.advance()
 
@@ -167,17 +168,17 @@ if __name__ == "__main__":
     MAX_LEN = 128
     epoch   = 2
 
-    model = Transformer(d_model=512, h_count=8, d_ff=1024, voc_size=16000,
-                        max_len=MAX_LEN, layers=6, batch_size=BATCH)
+    model = Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000,
+                        max_len=MAX_LEN, layers=3, batch_size=BATCH)
     # model = torch.load('./models/transformer-3.pth',weights_only=False)
 
     total_iteration = len(x_train_encoder) // BATCH
     tokenizer       = Tokenizer.from_file("bpe_translation.json")
 
     # move training data to GPU once; keep as int (bool masks built per-batch)
-    # x_train_encoder = torch.as_tensor(x_train_encoder, device=device)
-    # x_train_decoder = torch.as_tensor(x_train_decoder, device=device)
-    # x_train_target  = torch.as_tensor(x_train_target,  device=device).long()
+    x_train_encoder = torch.as_tensor(x_train_encoder).pin_memory()
+    x_train_decoder = torch.as_tensor(x_train_decoder).pin_memory()
+    x_train_target  = torch.as_tensor(x_train_target).long().pin_memory()
     x_val_encoder   = torch.as_tensor(x_val_encoder,   device=device)
     x_val_decoder   = torch.as_tensor(x_val_decoder,   device=device)
     x_val_target    = torch.as_tensor(x_val_target,    device=device).long()
@@ -203,13 +204,15 @@ if __name__ == "__main__":
         iteration  = 1
 
         for i in range(0, len(x_train_encoder) - BATCH, BATCH):
-            enc_b = torch.as_tensor(x_train_encoder[i : i + BATCH],device=device)
-            dec_b = torch.as_tensor(x_train_decoder[i : i + BATCH],device=device)
-            tgt_b = torch.as_tensor(x_train_target [i : i + BATCH],device=device).long()
+            enc_b = x_train_encoder[i : i + BATCH].to(device, non_blocking=True)
+            dec_b = x_train_decoder[i : i + BATCH].to(device, non_blocking=True)
+            tgt_b = x_train_target [i : i + BATCH].to(device, non_blocking=True)
 
             # ── masks computed HERE, for this batch only ──────────────────
             # Each is bool (64, 1, 1/T, T) – freed as soon as fit() returns
+
             with torch.no_grad():
+             with torch.autocast(device_type='cuda', dtype=torch.bfloat16):
                 enc_comb, dec_comb, dec_cross_comb = make_masks(enc_b, dec_b)
 
                 loss = model.fit(enc_b, dec_b, tgt_b,
@@ -221,16 +224,16 @@ if __name__ == "__main__":
             total_loss += loss
             iteration  += 1
         
-            # print(iteration)
-
+            
+            print(iteration)
             if iteration% 1000==0:
                 elapsed = time.perf_counter() - start_time
                 print(f"{iteration}-iter checkpoint: {elapsed:.1f}s")
-        #         for sample in samples:
-        #             ids = tokenizer.encode(sample).ids
-        #             padded = np.array([ids + [0] * (MAX_LEN - len(ids))])
-        #             sample_t = torch.as_tensor(padded, device=device)
-        #             predict(sample_t,np.array([ids]),model.encoder,model.decoder)
+                for sample in samples:
+                    ids = tokenizer.encode(sample).ids
+                    padded = np.array([ids + [0] * (MAX_LEN - len(ids))])
+                    sample_t = torch.as_tensor(padded, device=device)
+                    predict(sample_t,np.array([ids]),model.encoder,model.decoder)
                 val_enc_k = _mask_k(x_val_encoder)
                 val_enc_q = _mask_q(x_val_encoder)
                 val_dec_k = _mask_k(x_val_decoder)
@@ -275,4 +278,4 @@ if __name__ == "__main__":
             sample_t = torch.as_tensor(padded, device=device)
             predict(sample_t,np.array([ids]),model.encoder,model.decoder)
             # predict is a quick inference pass – no mask storage needed
-        torch.save(model, f"../workspace/models/transformer-{epoch}.pth")
+        # torch.save(model, f"../workspace/models/transformer-{epoch}.pth")
