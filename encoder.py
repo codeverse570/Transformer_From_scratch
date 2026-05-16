@@ -286,36 +286,16 @@ class Encoder():
             # Attention norm
             'att_alpha': del_att_alpha, 'att_beta': del_att_beta,
         })
-            #  self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(ff_w1_grad,self.W_ff1[layer].weight)
-            #  self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(ff_w2_grad,self.W_ff2[layer].weight)
-            #             #  self.W_ff1[layer].weight -= 0.001*ff_w1_grad
-            #             #  self.W_ff2[layer].weight -= 0.001*ff_w2_grad
-            # #  print(abs_mean(self.W_ff2[layer].weight),self.W_ff2_ada[layer].grad(ff_w2_grad,self.W_ff2[layer].weight).abs().mean())
-            #             #  print(abs_mean(self.W_ff2[layer].weight),self.W_ff2_ada[layer].grad(ff_w2_grad).abs().mean())
-            #  self.W_ff1[layer].bias -= self.W_ff1_ada[layer].grad(ff_b1_grad,self.W_ff1[layer].bias)
-            #  self.W_ff2[layer].bias -= self.W_ff2_ada[layer].grad(ff_b2_grad,self.W_ff2[layer].bias)
-            #  self.W_q[layer].weight -= self.W_q_ada[layer].grad(att_delta_W_q,self.W_q[layer].weight)
-            #  self.W_k[layer].weight -= self.W_k_ada[layer].grad(att_delta_W_k,self.W_k[layer].weight)
-            #  self.W_v[layer].weight -= self.W_v_ada[layer].grad(att_delta_W_v,self.W_v[layer].weight)
-            #  self.W_o[layer].weight -= self.W_o_ada[layer].grad(att_delta_W_o,self.W_o[layer].weight)
-            #  self.W_q[layer].bias -= self.W_q_ada[layer].grad(att_delta_W_q_b,self.W_q[layer].bias)
-            #  self.W_k[layer].bias -= self.W_k_ada[layer].grad(att_delta_W_k_b,self.W_k[layer].bias)
-            #  self.W_v[layer].bias -= self.W_v_ada[layer].grad(att_delta_W_v_b,self.W_v[layer].bias)
-            #  self.W_o[layer].bias -= self.W_o_ada[layer].grad(att_delta_W_o_b,self.W_o[layer].bias)
-            #             # #  print(self.W_q_ada[layer].grad(att_delta_W_q).abs().mean())
-            #  self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(del_att_alpha,self.W_norm_att_a[layer])
-            #  self.W_norm_att_b[layer] -= self.W_norm_self_b_ada[layer].grad(del_att_beta,self.W_norm_att_b[layer])
-            #  self.W_norm_ff_a[layer] -= self.W_norm_ff_a_ada[layer].grad(del_ff_alpha,self.W_norm_ff_a[layer])
-            #  self.W_norm_ff_b[layer] -= self.W_norm_ff_b_ada[layer].grad(del_ff_beta,self.W_norm_ff_b[layer])
-
-             
-               # carry forward only what's needed
          new_delta= self.dropout['emb'].backward(new_delta)
-         flat_tokens = torch.tensor(tags, device=device).view(-1)          # (B*T,)
-         flat_delta  = new_delta.view(-1, self.d_model)                      # (B*T, d_model)
-         W_voc_grad  = torch.zeros(self.voc_size, self.d_model, device=device)
-         W_voc_grad.index_add_(0, flat_tokens, flat_delta)
-         all_grads = [W_voc_grad]
+         flat_tokens = tags.view(-1)                        # (B*T,)
+         flat_delta  = new_delta.view(-1, self.d_model)      # (B*T, d_model)
+
+        # also fold in the output-projection gradient (was already in delta_W_voc)
+        # delta_W_voc here is the grad w.r.t. the tied weight from the logit layer
+        # We'll return it separately so the caller can merge before the sparse update.
+         emb_sparse_tokens = flat_tokens                      # (B*T,)
+         emb_sparse_grad   = flat_delta 
+         all_grads = []
          for store in layer_grad_store:
                 all_grads += [
                     store['ff_w1'],  store['ff_b1'],
@@ -330,48 +310,7 @@ class Encoder():
 
         #  coef = self.clip_grad_norm(all_grads, max_norm)   # ← single global coef for encoder
          self.grads= layer_grad_store
-                # ─────────────────────────────────────────
-                # PHASE 3 — apply clipped updates
-                # ─────────────────────────────────────────
-        #  for store in layer_grad_store:
-        #             layer = store['layer']
-        #             with torch.no_grad():
-        #                 # FF weights
-        #                 self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
-        #                 self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
-        #                 self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
-        #                 self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
-        #                 # FF norm
-        #                 self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
-        #                 self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
-        #                 # Self attention weights
-        #                 self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq'] * coef, self.W_q[layer].weight)
-        #                 self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk'] * coef, self.W_k[layer].weight)
-        #                 self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv'] * coef, self.W_v[layer].weight)
-        #                 self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so'] * coef, self.W_o[layer].weight)
-        #                 # Self attention biases
-        #                 self.W_q[layer].bias -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
-        #                 self.W_k[layer].bias -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
-        #                 self.W_v[layer].bias -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
-        #                 self.W_o[layer].bias -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
-        #                 # Attention norm
-        #                 self.W_norm_att_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['att_alpha'] * coef, self.W_norm_att_a[layer])
-        #                 self.W_norm_att_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['att_beta']  * coef, self.W_norm_att_b[layer])
-
-        #  counts = torch.zeros(self.voc_size, device=device)
-        #  counts.index_add_(0, flat_tokens, torch.ones(flat_tokens.shape[0], device=device))
-        #  counts = counts.clamp(min=1)
-        #  W_voc_grad = W_voc_grad / counts.unsqueeze(1)
-        #  rows_list   = flat_tokens.unique().tolist()
-        #  emb_grad=self.emb_ad.grad_emb(W_voc_grad[rows_list] ,rows_list,self.emb.weight[rows_list])
-        #  pos_grad= self.pos_ada.grad(torch.sum(new_delta , dim=0),self.pos.weight)
-        #  self.emb.weight[rows_list] -= emb_grad
-        #  self.pos.weight -= pos_grad
-        #  print(self.pos.weight.abs().mean(),pos_grad.abs().mean())
-         # FIX 4: always clear cached activations at the end of back()
-         #        so they don't accumulate alongside the new ones from the next fit()
-        #  self.clear_memory()
-         return W_voc_grad,torch.sum(new_delta , dim=0),all_grads
+         return torch.sum(new_delta , dim=0),all_grads,emb_sparse_tokens, emb_sparse_grad
     def grad_layer_norm(self, delta, alpha, beta, x, f_x, r_):
      combined = (x + f_x)
      mean  = combined.mean(dim=-1, keepdim=True)

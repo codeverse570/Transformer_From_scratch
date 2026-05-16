@@ -50,7 +50,7 @@ class AdamCustom:
     """
  
     def __init__(self, _, m, n, __, lr=1e-4,
-                 beta1=0.9, beta2=0.999, eps=1e-9,
+                 beta1=0.9, beta2=0.98, eps=1e-9,
                  scale=False, schedular=None):
         self.m         = m
         self.n         = n
@@ -156,4 +156,44 @@ class AdamCustom:
         # update = m * (lr_now / bc1) / denom
         update = m.div(denom).mul_(lr_now / bc1)                # 1 alloc (output)
  
+        return update
+    
+    def grad_sparse(self, idx: torch.Tensor, G: torch.Tensor) -> torch.Tensor:
+
+        self._ensure_w()           # m_w, v_w are still (vocab, d_model)
+
+        K = idx.shape[0]
+
+        # ── per-row step counter ─────────────────────────────────────────
+        # Each vocab row tracks its own t so bias-correction is exact even
+        # when a row is only seen occasionally.
+        if not hasattr(self, '_t_rows'):
+            self._t_rows = torch.zeros(self.m, device=device)   # (vocab,)
+
+        self._t_rows[idx] += 1
+        t_k   = self._t_rows[idx]                # (K,)  float step per row
+
+        # ── moment slices (views into the full tables) ───────────────────
+        m_k = self.m_w[idx]    # (K, d_model)
+        v_k = self.v_w[idx]
+
+        # in-place moment updates on the slices
+        m_k.mul_(self.beta1).add_(G, alpha=1.0 - self.beta1)
+        v_k.mul_(self.beta2).addcmul_(G, G, value=1.0 - self.beta2)
+
+        # write back (slices are copies when idx has repeated entries,
+        # but unique() guarantees no repeats here)
+        self.m_w[idx] = m_k
+        self.v_w[idx] = v_k
+
+        # ── bias correction (per row) ────────────────────────────────────
+        bc1 = 1.0 - self.beta1 ** t_k.unsqueeze(-1)   # (K, 1)
+        bc2 = 1.0 - self.beta2 ** t_k.unsqueeze(-1)
+
+        lr_now = self.schedular.get_lr() if self.schedular else self.lr
+
+        # denom = sqrt(v / bc2) + eps  (no mutation of v_k)
+        denom  = (v_k / bc2).sqrt_().add_(self.eps)
+        update = (m_k / bc1) / denom * lr_now    # (K, d_model)
+
         return update

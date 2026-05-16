@@ -657,12 +657,10 @@ class Decoder(nn.Module):
         # print(prev_delta)
         del_E= self.dropout['enc_out'].train(self.is_training).backward(del_E)
         prev_delta  = self.dropout['emb'].backward(prev_delta)
-        flat_tokens = self.D.view(-1)
-        flat_delta  = prev_delta.view(-1, self.d_model)
-        
-        self.emb_grad.zero_()
-        self.emb_grad.index_add_(0, flat_tokens, flat_delta)
-        delta_W_voc += self.emb_grad
+        flat_tokens = self.D.view(-1)                        # (B*T,)
+        flat_delta  = prev_delta.view(-1, self.d_model)      # (B*T, d_model)
+        emb_sparse_tokens = flat_tokens                      # (B*T,)
+        emb_sparse_grad   = flat_delta     
         
         all_grads = [delta_W_voc]
         for store in layer_grad_store:
@@ -677,45 +675,8 @@ class Decoder(nn.Module):
                 store['self_alpha'], store['self_beta'],
             ]
 
-        # coef = self.clip_grad_norm(all_grads, max_norm)
         self.grads=layer_grad_store
-        # for store in layer_grad_store:
-        #     layer = store['layer']
-        #     with torch.no_grad():
-        #         # FF
-        #         self.W_ff1[layer].weight -= self.W_ff1_ada[layer].grad(store['ff_w1'] * coef, self.W_ff1[layer].weight)
-        #         self.W_ff1[layer].bias   -= self.W_ff1_ada[layer].grad(store['ff_b1'] * coef, self.W_ff1[layer].bias)
-        #         self.W_ff2[layer].weight -= self.W_ff2_ada[layer].grad(store['ff_w2'] * coef, self.W_ff2[layer].weight)
-        #         self.W_ff2[layer].bias   -= self.W_ff2_ada[layer].grad(store['ff_b2'] * coef, self.W_ff2[layer].bias)
-        #         # FF norm
-        #         self.W_norm_ff_a[layer]  -= self.W_norm_ff_a_ada[layer].grad(store['ff_alpha'] * coef, self.W_norm_ff_a[layer])
-        #         self.W_norm_ff_b[layer]  -= self.W_norm_ff_b_ada[layer].grad(store['ff_beta']  * coef, self.W_norm_ff_b[layer])
-        #         # Cross attention
-        #         self.W_cross_q[layer].weight -= self.W_cross_q_ada[layer].grad(store['cq']   * coef, self.W_cross_q[layer].weight)
-        #         self.W_cross_k[layer].weight -= self.W_cross_k_ada[layer].grad(store['ck']   * coef, self.W_cross_k[layer].weight)
-        #         self.W_cross_v[layer].weight -= self.W_cross_v_ada[layer].grad(store['cv']   * coef, self.W_cross_v[layer].weight)
-        #         self.W_cross_o[layer].weight -= self.W_cross_o_ada[layer].grad(store['co']   * coef, self.W_cross_o[layer].weight)
-        #         self.W_cross_q[layer].bias   -= self.W_cross_q_ada[layer].grad(store['cq_b'] * coef, self.W_cross_q[layer].bias)
-        #         self.W_cross_k[layer].bias   -= self.W_cross_k_ada[layer].grad(store['ck_b'] * coef, self.W_cross_k[layer].bias)
-        #         self.W_cross_v[layer].bias   -= self.W_cross_v_ada[layer].grad(store['cv_b'] * coef, self.W_cross_v[layer].bias)
-        #         self.W_cross_o[layer].bias   -= self.W_cross_o_ada[layer].grad(store['co_b'] * coef, self.W_cross_o[layer].bias)
-        #         # Cross norm
-        #         self.W_norm_cross_a[layer] -= self.W_norm_cross_a_ada[layer].grad(store['cross_alpha'] * coef, self.W_norm_cross_a[layer])
-        #         self.W_norm_cross_b[layer] -= self.W_norm_cross_b_ada[layer].grad(store['cross_beta']  * coef, self.W_norm_cross_b[layer])
-        #         # Self attention
-        #         self.W_q[layer].weight -= self.W_q_ada[layer].grad(store['sq']   * coef, self.W_q[layer].weight)
-        #         self.W_k[layer].weight -= self.W_k_ada[layer].grad(store['sk']   * coef, self.W_k[layer].weight)
-        #         self.W_v[layer].weight -= self.W_v_ada[layer].grad(store['sv']   * coef, self.W_v[layer].weight)
-        #         self.W_o[layer].weight -= self.W_o_ada[layer].grad(store['so']   * coef, self.W_o[layer].weight)
-        #         self.W_q[layer].bias   -= self.W_q_ada[layer].grad(store['sq_b'] * coef, self.W_q[layer].bias)
-        #         self.W_k[layer].bias   -= self.W_k_ada[layer].grad(store['sk_b'] * coef, self.W_k[layer].bias)
-        #         self.W_v[layer].bias   -= self.W_v_ada[layer].grad(store['sv_b'] * coef, self.W_v[layer].bias)
-        #         self.W_o[layer].bias   -= self.W_o_ada[layer].grad(store['so_b'] * coef, self.W_o[layer].bias)
-        #         # Self norm
-        #         self.W_norm_self_a[layer] -= self.W_norm_self_a_ada[layer].grad(store['self_alpha'] * coef, self.W_norm_self_a[layer])
-        #         self.W_norm_self_b[layer] -= self.W_norm_self_b_ada[layer].grad(store['self_beta']  * coef, self.W_norm_self_b[layer])
-        
-        return del_E,loss,delta_W_voc,torch.sum(prev_delta, dim=0),all_grads
+        return del_E,loss,delta_W_voc,torch.sum(prev_delta, dim=0),all_grads,emb_sparse_tokens, emb_sparse_grad
 
     # ─────────────────────────────────────────────
     # Gradient helpers
