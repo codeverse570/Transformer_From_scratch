@@ -189,8 +189,8 @@ if __name__ == "__main__":
     MAX_LEN = 128
     epoch   = 2
 
-    model = Transformer(d_model=256, h_count=8, d_ff=512, voc_size=16000,
-                        max_len=MAX_LEN, layers=3, batch_size=BATCH)
+    model = Transformer(d_model=512, h_count=8, d_ff=2048, voc_size=16000,
+                        max_len=MAX_LEN, layers=6, batch_size=BATCH)
     # model = torch.load('./models/transformer-8.pth',weights_only=False)
 
     total_iteration = len(x_train_encoder) // BATCH
