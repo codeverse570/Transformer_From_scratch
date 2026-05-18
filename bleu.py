@@ -263,7 +263,7 @@ def strip_special(ids, bos=2, eos=3, pad=0):
 if __name__ == "__main__":
 
     # ── config ────────────────────────────────────────────────────────────
-    MODEL_PATH = "./models/transformer-8.pth"
+    MODEL_PATH = "../workspace/transformer-8.pth"
     TOK_PATH   = "bpe_translation.json"
     VAL_ENC    = "translation_data/validation/validation_encoder_input.json"
     VAL_TGT    = "translation_data/validation/validation_decoder_target.json"
