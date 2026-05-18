@@ -287,15 +287,11 @@ class Encoder():
             'att_alpha': del_att_alpha, 'att_beta': del_att_beta,
         })
          new_delta= self.dropout['emb'].backward(new_delta)
-         flat_tokens = tags.view(-1)                        # (B*T,)
-         flat_delta  = new_delta.view(-1, self.d_model)      # (B*T, d_model)
-
-        # also fold in the output-projection gradient (was already in delta_W_voc)
-        # delta_W_voc here is the grad w.r.t. the tied weight from the logit layer
-        # We'll return it separately so the caller can merge before the sparse update.
-         emb_sparse_tokens = flat_tokens                      # (B*T,)
-         emb_sparse_grad   = flat_delta 
-         all_grads = []
+         flat_tokens = torch.tensor(tags, device=device).view(-1)          # (B*T,)
+         flat_delta  = new_delta.view(-1, self.d_model)                      # (B*T, d_model)
+         W_voc_grad  = torch.zeros(self.voc_size, self.d_model, device=device)
+         W_voc_grad.index_add_(0, flat_tokens, flat_delta)
+         all_grads = [W_voc_grad]
          for store in layer_grad_store:
                 all_grads += [
                     store['ff_w1'],  store['ff_b1'],
@@ -310,7 +306,7 @@ class Encoder():
 
         #  coef = self.clip_grad_norm(all_grads, max_norm)   # ← single global coef for encoder
          self.grads= layer_grad_store
-         return torch.sum(new_delta , dim=0),all_grads,emb_sparse_tokens, emb_sparse_grad
+         return W_voc_grad,torch.sum(new_delta , dim=0),all_grads
     def grad_layer_norm(self, delta, alpha, beta, x, f_x, r_):
      combined = (x + f_x)
      mean  = combined.mean(dim=-1, keepdim=True)

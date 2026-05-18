@@ -657,10 +657,13 @@ class Decoder(nn.Module):
         # print(prev_delta)
         del_E= self.dropout['enc_out'].train(self.is_training).backward(del_E)
         prev_delta  = self.dropout['emb'].backward(prev_delta)
-        flat_tokens = self.D.view(-1)                        # (B*T,)
-        flat_delta  = prev_delta.view(-1, self.d_model)      # (B*T, d_model)
-        emb_sparse_tokens = flat_tokens                      # (B*T,)
-        emb_sparse_grad   = flat_delta     
+        flat_tokens = self.D.view(-1)
+        flat_delta  = prev_delta.view(-1, self.d_model)
+        
+        self.emb_grad.zero_()
+        self.emb_grad.index_add_(0, flat_tokens, flat_delta)
+        delta_W_voc += self.emb_grad
+        
         
         all_grads = [delta_W_voc]
         for store in layer_grad_store:
@@ -676,7 +679,7 @@ class Decoder(nn.Module):
             ]
 
         self.grads=layer_grad_store
-        return del_E,loss,delta_W_voc,torch.sum(prev_delta, dim=0),all_grads,emb_sparse_tokens, emb_sparse_grad
+        return del_E,loss,delta_W_voc,torch.sum(prev_delta, dim=0),all_grads
 
     # ─────────────────────────────────────────────
     # Gradient helpers

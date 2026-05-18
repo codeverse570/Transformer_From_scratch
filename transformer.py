@@ -96,58 +96,37 @@ class Transformer:
         self.schedular.advance()
 
         # ── backward ─────────────────────────────────────────────────────
-        del_E, loss, delta_W_voc, dec_pos_grad, decoder_all_grads,dec_sparse_tokens, dec_sparse_grad = \
+        del_E, loss, dec_emb_grad, dec_pos_grad, decoder_all_grads = \
             self.decoder.back_pre(targets, prob)
 
         # free the decoder logits tensor – no longer needed
         del prob
         
-        enc_pos_grad, encoder_all_grads,enc_sparse_tokens, enc_sparse_grad= \
+        enc_emb_grad, enc_pos_grad, encoder_all_grads = \
             self.encoder.back_pre(del_E, E, encoder_inputs)
 
         # free encoder output – no longer needed after back_pre
         del E, del_E
-        all_tokens   = torch.cat([dec_sparse_tokens,
-                               enc_sparse_tokens])          # (B*T_d + B*T_e,)
-        all_grads_emb = torch.cat([dec_sparse_grad,
-                                enc_sparse_grad]) 
+
         # ── clip + update ─────────────────────────────────────────────────
-        unique_idx, inverse = torch.unique(all_tokens, sorted=False,
-                                        return_inverse=True)
-        reduced_grad = torch.zeros(unique_idx.shape[0], self.d_model,
-                                device=device)
-
-
-        # 4. Sparse Adam — only unique_idx rows get a moment update.
-        
-
+        emb_grad = dec_emb_grad + enc_emb_grad
         pos_grad = dec_pos_grad + enc_pos_grad
 
         coef = self.clip_grad_norm_fast(
-            decoder_all_grads + encoder_all_grads + [delta_W_voc, pos_grad]
+            decoder_all_grads + encoder_all_grads + [emb_grad, pos_grad]
         )
-        reduced_grad.index_add_(0, inverse, coef * all_grads_emb)
-
-        # 3. Fold in the output-projection (tied) gradient for the same unique rows.
-        #    delta_W_voc shape is (d_model, vocab) — we need (vocab, d_model) rows.
-        reduced_grad += coef * delta_W_voc[unique_idx]
 
         # weight updates (encoders/decoders clear their own grad stores)
         self.encoder.update_weights(coef)
         self.decoder.update_weights(coef)
 
         with torch.no_grad():
-           
+            self.emb.weight -= self.emb_ad.grad(coef * emb_grad, self.emb)
             self.pos.weight -= self.pos_ada.grad(coef * pos_grad, self.emb)
-            emb_update = self.emb_ad.grad_sparse(unique_idx, reduced_grad)
-            self.emb.weight[unique_idx] -= emb_update
 
         # explicitly free temporaries so CUDA can reuse the memory
-        del all_tokens, all_grads_emb, reduced_grad, emb_update
-        del dec_sparse_tokens, dec_sparse_grad
-        del enc_sparse_tokens, enc_sparse_grad
-        del delta_W_voc, decoder_all_grads, encoder_all_grads
-        del pos_grad
+        del emb_grad, pos_grad, decoder_all_grads, encoder_all_grads
+        del dec_emb_grad, enc_emb_grad, dec_pos_grad, enc_pos_grad
 
         return loss
 
